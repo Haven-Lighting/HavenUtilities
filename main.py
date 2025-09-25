@@ -38,7 +38,7 @@ def pygame_process(q):
     font = pygame.font.SysFont("arial", 14, bold=True)
 
     # Effect settings
-    effects = ["Rainbow Road", "Comet", "Pulse Wave", "Twinkle", "Fire Flicker", "Cars", "Bubbles", "Melting Points"]
+    effects = ["Rainbow Road", "Comet", "Pulse Wave", "Twinkle", "Fire Flicker", "Cars", "Bubbles", "Melting Points", "Fireworks"]
     selected_effect = "Rainbow Road"
     effect_button_rect = pygame.Rect(20, INITIAL_HEIGHT - CONTROL_HEIGHT + 10, 120, 30)
     popup_open = False
@@ -70,6 +70,16 @@ def pygame_process(q):
     melt_spacing = 25
     melt_speed = 1.0
     melt_point_selection = False
+    # Fireworks settings
+    fireworks_num = 3
+    fireworks_launch_freq = 0.5
+    fireworks_explosion_speed = 2.0
+    fireworks_fade_rate = 0.02
+    fireworks_flicker_rate = 5.0
+    fireworks_colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255), (0, 255, 255)]
+    fireworks_particles = []
+    fireworks_last_launch = 0
+    fireworks_color_index = 0
     color_picker_open = False
     slider_open = False
     slider_type = ""
@@ -96,6 +106,11 @@ def pygame_process(q):
     melt_color_rect = None
     melt_speed_rect = None
     melt_points_rect = None
+    fireworks_num_rect = None
+    fireworks_speed_rect = None
+    fireworks_fade_rect = None
+    fireworks_flicker_rect = None
+    fireworks_color_rect = None
     slider_rect = None
     color_picker_rect = None
 
@@ -103,7 +118,8 @@ def pygame_process(q):
     def update_control_rects(height):
         nonlocal effect_button_rect, rainbow_speed_rect, comet_reverse_rect, comet_color_rect, comet_speed_faster_rect, comet_speed_slower_rect, comet_size_rect
         nonlocal pulse_speed_rect, pulse_color_rect, twinkle_freq_rect, twinkle_color_rect, flicker_speed_rect, flicker_intensity_rect
-        nonlocal cars_num_rect, cars_color_rect, bubbles_speed_rect, bubbles_color_rect, melt_spacing_rect, melt_color_rect, melt_speed_rect, melt_points_rect, slider_rect, color_picker_rect
+        nonlocal cars_num_rect, cars_color_rect, bubbles_speed_rect, bubbles_color_rect, melt_spacing_rect, melt_color_rect, melt_speed_rect, melt_points_rect
+        nonlocal fireworks_num_rect, fireworks_speed_rect, fireworks_fade_rect, fireworks_flicker_rect, fireworks_color_rect, slider_rect, color_picker_rect
         effect_button_rect = pygame.Rect(20, height - CONTROL_HEIGHT + 10, 120, 30)
         rainbow_speed_rect = pygame.Rect(160, height - CONTROL_HEIGHT + 10, 120, 30)
         comet_reverse_rect = pygame.Rect(160, height - CONTROL_HEIGHT + 10, 120, 30)
@@ -125,6 +141,11 @@ def pygame_process(q):
         melt_color_rect = pygame.Rect(160, height - CONTROL_HEIGHT + 50, 120, 30)
         melt_speed_rect = pygame.Rect(300, height - CONTROL_HEIGHT + 50, 120, 30)
         melt_points_rect = pygame.Rect(300, height - CONTROL_HEIGHT + 10, 120, 30)
+        fireworks_num_rect = pygame.Rect(160, height - CONTROL_HEIGHT + 10, 120, 30)
+        fireworks_speed_rect = pygame.Rect(160, height - CONTROL_HEIGHT + 50, 120, 30)
+        fireworks_fade_rect = pygame.Rect(300, height - CONTROL_HEIGHT + 10, 120, 30)
+        fireworks_flicker_rect = pygame.Rect(300, height - CONTROL_HEIGHT + 50, 120, 30)
+        fireworks_color_rect = pygame.Rect(160, height - CONTROL_HEIGHT + 90, 120, 30)
         slider_rect = pygame.Rect(440, height - CONTROL_HEIGHT + 10, 120, 24)
         color_picker_rect = pygame.Rect(440, height - CONTROL_HEIGHT + 50, 120, 60)
 
@@ -220,6 +241,61 @@ def pygame_process(q):
                 )
         return lights
 
+    def generate_fireworks(lights, t, num_fireworks, explosion_speed, fade_rate, flicker_rate, fireworks_colors, particles, last_launch, fireworks_color_index):
+        lights = [(0, 0, 0) for _ in range(NUM_LIGHTS)]
+        current_time = t
+
+        # Launch new fireworks
+        if current_time - last_launch > 1.0 / fireworks_launch_freq:
+            launch_pos = random.randint(20, NUM_LIGHTS - 20)
+            bang_color = (255, 165, 0)  # Bright orange
+            lights[launch_pos] = bang_color
+            # Create particles spreading outwards, all same color
+            particle_color = fireworks_colors[random.randint(0, len(fireworks_colors) - 1)]
+            num_particles_left = random.randint(5, 10)
+            num_particles_right = random.randint(5, 10)
+            for _ in range(num_particles_left):
+                particles.append({
+                    'pos': launch_pos,
+                    'dist': 0,
+                    'direction': -1,
+                    'color': particle_color,
+                    'brightness': 1.0,
+                    'speed': random.uniform(1.0, explosion_speed)
+                })
+            for _ in range(num_particles_right):
+                particles.append({
+                    'pos': launch_pos,
+                    'dist': 0,
+                    'direction': 1,
+                    'color': particle_color,
+                    'brightness': 1.0,
+                    'speed': random.uniform(1.0, explosion_speed)
+                })
+            last_launch = current_time
+            if len(particles) > num_fireworks * 20:  # Limit total particles
+                particles = particles[-num_fireworks * 20:]
+
+        # Update particles
+        new_particles = []
+        for p in particles:
+            p['dist'] += p['speed']
+            p['brightness'] -= fade_rate * (p['dist'] / 10)  # Dimmer as farther
+            if p['brightness'] > 0:
+                idx = int(p['pos'] + p['dist'] * p['direction']) % NUM_LIGHTS
+                flicker = 0.5 + 0.5 * math.sin(current_time * flicker_rate + idx)
+                col_r = int(p['color'][0] * p['brightness'] * flicker)
+                col_g = int(p['color'][1] * p['brightness'] * flicker)
+                col_b = int(p['color'][2] * p['brightness'] * flicker)
+                lights[idx] = (min(255, lights[idx][0] + col_r),
+                               min(255, lights[idx][1] + col_g),
+                               min(255, lights[idx][2] + col_b))
+                new_particles.append(p)
+
+        particles[:] = new_particles
+
+        return lights, particles, last_launch, fireworks_color_index
+
     lights = [(0, 0, 0) for _ in range(NUM_LIGHTS)]
     running = True
     t = 0
@@ -257,6 +333,8 @@ def pygame_process(q):
                                 melt_point_selection = False
                                 if effect == "Melting Points":
                                     melt_points.clear()
+                                if effect == "Fireworks":
+                                    fireworks_particles.clear()
                     elif selected_effect == "Melting Points" and melt_point_selection and event.pos[1] < screen.get_height() - CONTROL_HEIGHT:
                         light_width = max(MIN_LIGHT_SIZE, (screen.get_width() - (NUM_LIGHTS - 1) * SPACING) // NUM_LIGHTS)
                         idx = min(NUM_LIGHTS - 1, max(0, event.pos[0] // (light_width + SPACING)))
@@ -391,6 +469,38 @@ def pygame_process(q):
                                 melt_spacing = 10 + slider_pos * (50 - 10)
                             elif slider_type == "melt_speed":
                                 melt_speed = 0.1 + slider_pos * (2.0 - 0.1)
+                    elif selected_effect == "Fireworks":
+                        if fireworks_num_rect.collidepoint(event.pos):
+                            slider_open = not slider_open
+                            slider_type = "fireworks_num"
+                        elif fireworks_speed_rect.collidepoint(event.pos):
+                            slider_open = not slider_open
+                            slider_type = "fireworks_speed"
+                        elif fireworks_fade_rect.collidepoint(event.pos):
+                            slider_open = not slider_open
+                            slider_type = "fireworks_fade"
+                        elif fireworks_flicker_rect.collidepoint(event.pos):
+                            slider_open = not slider_open
+                            slider_type = "fireworks_flicker"
+                        elif fireworks_color_rect.collidepoint(event.pos):
+                            color_picker_open = not color_picker_open
+                        elif color_picker_open:
+                            for i, color in enumerate(color_options):
+                                rect = pygame.Rect(440 + (i % 3) * 40, screen.get_height() - CONTROL_HEIGHT + 50 + (i // 3) * 25, 30, 20)
+                                if rect.collidepoint(event.pos):
+                                    fireworks_colors[fireworks_color_index] = color
+                                    fireworks_color_index = (fireworks_color_index + 1) % len(fireworks_colors)
+                                    color_picker_open = False
+                        elif slider_open and slider_rect.collidepoint(event.pos):
+                            slider_pos = (event.pos[0] - slider_rect.x) / slider_rect.width
+                            if slider_type == "fireworks_num":
+                                fireworks_num = int(1 + slider_pos * 5)
+                            elif slider_type == "fireworks_speed":
+                                fireworks_explosion_speed = 0.5 + slider_pos * (5.0 - 0.5)
+                            elif slider_type == "fireworks_fade":
+                                fireworks_fade_rate = 0.01 + slider_pos * (0.05 - 0.01)
+                            elif slider_type == "fireworks_flicker":
+                                fireworks_flicker_rate = 1.0 + slider_pos * (10.0 - 1.0)
 
             if selected_effect == "Rainbow Road":
                 lights = generate_rainbow_road(lights, t)
@@ -424,6 +534,9 @@ def pygame_process(q):
                     bubbles[i] = (pos, speed, direction)
             elif selected_effect == "Melting Points":
                 lights = generate_melting_points(lights, melt_points, melt_color, melt_spacing, t, melt_speed)
+                t += delta_time
+            elif selected_effect == "Fireworks":
+                lights, fireworks_particles, fireworks_last_launch, fireworks_color_index = generate_fireworks(lights, t, fireworks_num, fireworks_explosion_speed, fireworks_fade_rate, fireworks_flicker_rate, fireworks_colors, fireworks_particles, fireworks_last_launch, fireworks_color_index)
                 t += delta_time
 
             q.put(lights)
@@ -603,7 +716,41 @@ def pygame_process(q):
                     slider_pos = (melt_speed - 0.1) / (2.0 - 0.1)
                     knob_x = slider_rect.x + slider_pos * slider_rect.width
                     pygame.draw.circle(screen, (59, 130, 246), (int(knob_x), slider_rect.centery), 8)
-            if color_picker_open and selected_effect in ["Comet", "Pulse Wave", "Twinkle", "Cars", "Bubbles", "Melting Points"]:
+            elif selected_effect == "Fireworks":
+                pygame.draw.rect(screen, (59, 130, 246) if fireworks_num_rect.collidepoint(mouse_pos) else (37, 99, 235), fireworks_num_rect, border_radius=8)
+                pygame.draw.rect(screen, (209, 213, 219), fireworks_num_rect, 1, border_radius=8)
+                text = font.render(f"Num: {fireworks_num}", True, (255, 255, 255))
+                screen.blit(text, (170, screen.get_height() - CONTROL_HEIGHT + 15))
+                pygame.draw.rect(screen, (59, 130, 246) if fireworks_speed_rect.collidepoint(mouse_pos) else (37, 99, 235), fireworks_speed_rect, border_radius=8)
+                pygame.draw.rect(screen, (209, 213, 219), fireworks_speed_rect, 1, border_radius=8)
+                text = font.render(f"Speed: {fireworks_explosion_speed:.1f}", True, (255, 255, 255))
+                screen.blit(text, (170, screen.get_height() - CONTROL_HEIGHT + 55))
+                pygame.draw.rect(screen, (59, 130, 246) if fireworks_fade_rect.collidepoint(mouse_pos) else (37, 99, 235), fireworks_fade_rect, border_radius=8)
+                pygame.draw.rect(screen, (209, 213, 219), fireworks_fade_rect, 1, border_radius=8)
+                text = font.render(f"Fade: {fireworks_fade_rate:.3f}", True, (255, 255, 255))
+                screen.blit(text, (310, screen.get_height() - CONTROL_HEIGHT + 15))
+                pygame.draw.rect(screen, (59, 130, 246) if fireworks_flicker_rect.collidepoint(mouse_pos) else (37, 99, 235), fireworks_flicker_rect, border_radius=8)
+                pygame.draw.rect(screen, (209, 213, 219), fireworks_flicker_rect, 1, border_radius=8)
+                text = font.render(f"Flicker: {fireworks_flicker_rate:.1f}", True, (255, 255, 255))
+                screen.blit(text, (310, screen.get_height() - CONTROL_HEIGHT + 55))
+                pygame.draw.rect(screen, (59, 130, 246) if fireworks_color_rect.collidepoint(mouse_pos) else (37, 99, 235), fireworks_color_rect, border_radius=8)
+                pygame.draw.rect(screen, (209, 213, 219), fireworks_color_rect, 1, border_radius=8)
+                text = font.render(f"Color {fireworks_color_index+1}", True, (255, 255, 255))
+                screen.blit(text, (170, screen.get_height() - CONTROL_HEIGHT + 95))
+                if slider_open and slider_type in ["fireworks_num", "fireworks_speed", "fireworks_fade", "fireworks_flicker"]:
+                    pygame.draw.rect(screen, (31, 41, 55), slider_rect, border_radius=6)
+                    pygame.draw.rect(screen, (209, 213, 219), slider_rect, 1, border_radius=6)
+                    if slider_type == "fireworks_num":
+                        slider_pos = (fireworks_num - 1) / 5
+                    elif slider_type == "fireworks_speed":
+                        slider_pos = (fireworks_explosion_speed - 0.5) / (5.0 - 0.5)
+                    elif slider_type == "fireworks_fade":
+                        slider_pos = (fireworks_fade_rate - 0.01) / (0.05 - 0.01)
+                    elif slider_type == "fireworks_flicker":
+                        slider_pos = (fireworks_flicker_rate - 1.0) / (10.0 - 1.0)
+                    knob_x = slider_rect.x + slider_pos * slider_rect.width
+                    pygame.draw.circle(screen, (59, 130, 246), (int(knob_x), slider_rect.centery), 8)
+            if color_picker_open and selected_effect in ["Comet", "Pulse Wave", "Twinkle", "Cars", "Bubbles", "Melting Points", "Fireworks"]:
                 for i, color in enumerate(color_options):
                     rect = pygame.Rect(440 + (i % 3) * 40, screen.get_height() - CONTROL_HEIGHT + 50 + (i // 3) * 25, 30, 20)
                     pygame.draw.rect(screen, color, rect, border_radius=6)
