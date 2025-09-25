@@ -45,9 +45,9 @@ def pygame_process(q):
     confirmation_timer = 0
     confirmation_effect = ""
     rainbow_speed = 0.05
-    comet_speed = 0.1
+    comet_speed = 1.0
     comet_color = (255, 0, 0)
-    comet_size = 5
+    comet_size = 6
     comet_direction = 1
     comet_head = 0
     pulse_speed = 0.05
@@ -68,6 +68,7 @@ def pygame_process(q):
     melt_points = []
     melt_color = random.choice([(100, 0, 0), (100, 0, 100)])
     melt_spacing = 25
+    melt_speed = 1.0
     melt_point_selection = False
     color_picker_open = False
     slider_open = False
@@ -93,6 +94,7 @@ def pygame_process(q):
     bubbles_color_rect = None
     melt_spacing_rect = None
     melt_color_rect = None
+    melt_speed_rect = None
     melt_points_rect = None
     slider_rect = None
     color_picker_rect = None
@@ -101,7 +103,7 @@ def pygame_process(q):
     def update_control_rects(height):
         nonlocal effect_button_rect, rainbow_speed_rect, comet_reverse_rect, comet_color_rect, comet_speed_faster_rect, comet_speed_slower_rect, comet_size_rect
         nonlocal pulse_speed_rect, pulse_color_rect, twinkle_freq_rect, twinkle_color_rect, flicker_speed_rect, flicker_intensity_rect
-        nonlocal cars_num_rect, cars_color_rect, bubbles_speed_rect, bubbles_color_rect, melt_spacing_rect, melt_color_rect, melt_points_rect, slider_rect, color_picker_rect
+        nonlocal cars_num_rect, cars_color_rect, bubbles_speed_rect, bubbles_color_rect, melt_spacing_rect, melt_color_rect, melt_speed_rect, melt_points_rect, slider_rect, color_picker_rect
         effect_button_rect = pygame.Rect(20, height - CONTROL_HEIGHT + 10, 120, 30)
         rainbow_speed_rect = pygame.Rect(160, height - CONTROL_HEIGHT + 10, 120, 30)
         comet_reverse_rect = pygame.Rect(160, height - CONTROL_HEIGHT + 10, 120, 30)
@@ -121,6 +123,7 @@ def pygame_process(q):
         bubbles_color_rect = pygame.Rect(160, height - CONTROL_HEIGHT + 50, 120, 30)
         melt_spacing_rect = pygame.Rect(160, height - CONTROL_HEIGHT + 10, 120, 30)
         melt_color_rect = pygame.Rect(160, height - CONTROL_HEIGHT + 50, 120, 30)
+        melt_speed_rect = pygame.Rect(300, height - CONTROL_HEIGHT + 50, 120, 30)
         melt_points_rect = pygame.Rect(300, height - CONTROL_HEIGHT + 10, 120, 30)
         slider_rect = pygame.Rect(440, height - CONTROL_HEIGHT + 10, 120, 24)
         color_picker_rect = pygame.Rect(440, height - CONTROL_HEIGHT + 50, 120, 60)
@@ -189,7 +192,7 @@ def pygame_process(q):
                            min(255, lights[idx][2] + color[2]))
         return lights
 
-    def generate_melting_points(lights, points, color, spacing, t):
+    def generate_melting_points(lights, points, color, spacing, t, melt_speed):
         lights = [(0, 0, 0) for _ in range(NUM_LIGHTS)]
         point_color = (0, 255, 255)
         for point in points:
@@ -198,7 +201,7 @@ def pygame_process(q):
             for i in range(1, int(spacing) + 1):
                 left_idx = (idx - i) % NUM_LIGHTS
                 right_idx = (idx + i) % NUM_LIGHTS
-                t_offset = math.sin(t + i * 0.2) * 0.3
+                t_offset = math.sin(t * melt_speed + i * 0.2) * 0.3
                 t_interp = min(1, max(0, i / spacing + t_offset))
                 blended_color = (
                     int(point_color[0] * (1 - t_interp) + color[0] * t_interp),
@@ -221,6 +224,8 @@ def pygame_process(q):
     running = True
     t = 0
     clock = pygame.time.Clock()
+    FPS = 60
+    delta_time = 1.0 / FPS
 
     while running:
         try:
@@ -272,9 +277,9 @@ def pygame_process(q):
                         elif comet_color_rect.collidepoint(event.pos):
                             color_picker_open = not color_picker_open
                         elif comet_speed_faster_rect.collidepoint(event.pos):
-                            comet_speed = min(comet_speed + 0.05, 0.5)
+                            comet_speed = min(comet_speed + 1.0, 20.0)
                         elif comet_speed_slower_rect.collidepoint(event.pos):
-                            comet_speed = max(comet_speed - 0.05, 0.05)
+                            comet_speed = max(comet_speed - 1.0, 0.5)
                         elif comet_size_rect.collidepoint(event.pos):
                             slider_open = not slider_open
                             slider_type = "comet_size"
@@ -286,7 +291,7 @@ def pygame_process(q):
                                     color_picker_open = False
                         elif slider_open and slider_rect.collidepoint(event.pos):
                             slider_pos = (event.pos[0] - slider_rect.x) / slider_rect.width
-                            comet_size = int(4 + slider_pos * (100 - 4))
+                            comet_size = int(6 + slider_pos * (100 - 6))
                     elif selected_effect == "Pulse Wave":
                         if pulse_speed_rect.collidepoint(event.pos):
                             slider_open = not slider_open
@@ -367,6 +372,9 @@ def pygame_process(q):
                             slider_type = "melt_spacing"
                         elif melt_color_rect.collidepoint(event.pos):
                             color_picker_open = not color_picker_open
+                        elif melt_speed_rect.collidepoint(event.pos):
+                            slider_open = not slider_open
+                            slider_type = "melt_speed"
                         elif melt_points_rect.collidepoint(event.pos):
                             melt_point_selection = not melt_point_selection
                             slider_open = False
@@ -379,41 +387,44 @@ def pygame_process(q):
                                     color_picker_open = False
                         elif slider_open and slider_rect.collidepoint(event.pos):
                             slider_pos = (event.pos[0] - slider_rect.x) / slider_rect.width
-                            melt_spacing = 10 + slider_pos * (50 - 10)
+                            if slider_type == "melt_spacing":
+                                melt_spacing = 10 + slider_pos * (50 - 10)
+                            elif slider_type == "melt_speed":
+                                melt_speed = 0.1 + slider_pos * (2.0 - 0.1)
 
             if selected_effect == "Rainbow Road":
                 lights = generate_rainbow_road(lights, t)
-                t += rainbow_speed
+                t += rainbow_speed * delta_time
             elif selected_effect == "Comet":
                 lights = generate_comet(lights, comet_head, comet_color, comet_size, comet_direction)
-                comet_head += comet_speed * comet_direction
+                comet_head += (comet_speed * delta_time) * comet_direction
             elif selected_effect == "Pulse Wave":
                 lights = generate_pulse_wave(lights, t, pulse_speed, pulse_color)
-                t += pulse_speed
+                t += pulse_speed * delta_time
             elif selected_effect == "Twinkle":
                 lights = generate_twinkle(lights, t, twinkle_freq, twinkle_color)
-                t += 0.05
+                t += 0.05 * delta_time
             elif selected_effect == "Fire Flicker":
                 lights = generate_fire_flicker(lights, t, flicker_speed, flicker_intensity)
-                t += 0.05
+                t += 0.05 * delta_time
             elif selected_effect == "Cars":
                 lights = generate_cars(lights, cars_positions, cars_colors, cars_speeds, cars_directions, cars_num)
                 for i in range(4):
-                    cars_positions[i] += cars_speeds[i] * cars_directions[i]
+                    cars_positions[i] += cars_speeds[i] * cars_directions[i] * delta_time * 60  # Adjust for per second
                     if cars_positions[i] < 0 or cars_positions[i] >= NUM_LIGHTS:
                         cars_directions[i] *= -1
                         cars_positions[i] = max(0, min(NUM_LIGHTS - 1, cars_positions[i]))
             elif selected_effect == "Bubbles":
                 lights = generate_bubbles(lights, bubbles, bubbles_color, bubbles_speed)
                 for i, (pos, speed, direction) in enumerate(bubbles):
-                    pos += speed * direction
+                    pos += speed * direction * delta_time * 60  # Adjust for per second
                     if pos < 0 or pos >= NUM_LIGHTS:
                         direction *= -1
                         pos = max(0, min(NUM_LIGHTS - 1, pos))
                     bubbles[i] = (pos, speed, direction)
             elif selected_effect == "Melting Points":
-                lights = generate_melting_points(lights, melt_points, melt_color, melt_spacing, t)
-                t += 0.05
+                lights = generate_melting_points(lights, melt_points, melt_color, melt_spacing, t, melt_speed)
+                t += delta_time
 
             q.put(lights)
 
@@ -485,7 +496,7 @@ def pygame_process(q):
                 if slider_open and slider_type == "comet_size":
                     pygame.draw.rect(screen, (31, 41, 55), slider_rect, border_radius=6)
                     pygame.draw.rect(screen, (209, 213, 219), slider_rect, 1, border_radius=6)
-                    slider_pos = (comet_size - 4) / (100 - 4)
+                    slider_pos = (comet_size - 6) / (100 - 6)
                     knob_x = slider_rect.x + slider_pos * slider_rect.width
                     pygame.draw.circle(screen, (59, 130, 246), (int(knob_x), slider_rect.centery), 8)
             elif selected_effect == "Pulse Wave":
@@ -572,6 +583,10 @@ def pygame_process(q):
                 pygame.draw.rect(screen, (209, 213, 219), melt_color_rect, 1, border_radius=8)
                 text = font.render("Abyss Color", True, (255, 255, 255))
                 screen.blit(text, (170, screen.get_height() - CONTROL_HEIGHT + 55))
+                pygame.draw.rect(screen, (59, 130, 246) if melt_speed_rect.collidepoint(mouse_pos) else (37, 99, 235), melt_speed_rect, border_radius=8)
+                pygame.draw.rect(screen, (209, 213, 219), melt_speed_rect, 1, border_radius=8)
+                text = font.render(f"Speed: {melt_speed:.2f}", True, (255, 255, 255))
+                screen.blit(text, (310, screen.get_height() - CONTROL_HEIGHT + 55))
                 pygame.draw.rect(screen, (59, 130, 246) if melt_points_rect.collidepoint(mouse_pos) else (37, 99, 235), melt_points_rect, border_radius=8)
                 pygame.draw.rect(screen, (209, 213, 219), melt_points_rect, 1, border_radius=8)
                 text = font.render("Select Points" if not melt_point_selection else "Stop Selecting", True, (255, 255, 255))
@@ -582,6 +597,12 @@ def pygame_process(q):
                     slider_pos = (melt_spacing - 10) / (50 - 10)
                     knob_x = slider_rect.x + slider_pos * slider_rect.width
                     pygame.draw.circle(screen, (59, 130, 246), (int(knob_x), slider_rect.centery), 8)
+                elif slider_open and slider_type == "melt_speed":
+                    pygame.draw.rect(screen, (31, 41, 55), slider_rect, border_radius=6)
+                    pygame.draw.rect(screen, (209, 213, 219), slider_rect, 1, border_radius=6)
+                    slider_pos = (melt_speed - 0.1) / (2.0 - 0.1)
+                    knob_x = slider_rect.x + slider_pos * slider_rect.width
+                    pygame.draw.circle(screen, (59, 130, 246), (int(knob_x), slider_rect.centery), 8)
             if color_picker_open and selected_effect in ["Comet", "Pulse Wave", "Twinkle", "Cars", "Bubbles", "Melting Points"]:
                 for i, color in enumerate(color_options):
                     rect = pygame.Rect(440 + (i % 3) * 40, screen.get_height() - CONTROL_HEIGHT + 50 + (i // 3) * 25, 30, 20)
@@ -589,7 +610,7 @@ def pygame_process(q):
                     pygame.draw.rect(screen, (209, 213, 219), rect, 1, border_radius=6)
 
             pygame.display.flip()
-            clock.tick(60)
+            clock.tick(FPS)
         except Exception as e:
             print(f"Pygame error: {e}")
             running = False
@@ -618,6 +639,13 @@ def tkinter_process(q):
     connect_btn = tk.Button(root, text="Connect")
     connect_btn.pack(pady=5)
 
+    tk.Label(root, text="Refresh Rate (Hz):").pack(pady=5)
+    refresh_var = tk.StringVar(value="5")
+    refresh_entry = tk.Entry(root, textvariable=refresh_var, width=10, state=tk.DISABLED)
+    refresh_entry.pack(pady=5)
+    apply_btn = tk.Button(root, text="Apply", state=tk.DISABLED)
+    apply_btn.pack(pady=5)
+
     tk.Label(root, text="Terminal:").pack(pady=5)
     term = scrolledtext.ScrolledText(root, height=10, width=50, state=tk.DISABLED)
     term.pack(pady=5, fill=tk.BOTH, expand=True)
@@ -639,6 +667,7 @@ def tkinter_process(q):
     reader_thread = None
     sender_thread = None
     test_thread = None
+    send_interval = 0.2
 
     def update_terminal():
         try:
@@ -651,6 +680,15 @@ def tkinter_process(q):
         except qmod.Empty:
             pass
         root.after(100, update_terminal)
+
+    def apply_refresh():
+        nonlocal send_interval
+        try:
+            hz = float(refresh_var.get())
+            send_interval = 1.0 / hz
+            term_queue.put(f"Set refresh to {hz} Hz ({send_interval:.2f}s)")
+        except ValueError:
+            term_queue.put("Invalid rate")
 
     def connect():
         nonlocal ser, connected, reader_thread
@@ -665,6 +703,8 @@ def tkinter_process(q):
             connect_btn.config(text="Disconnect", state=tk.NORMAL)
             port_combo.config(state=tk.DISABLED)
             baud_combo.config(state=tk.DISABLED)
+            refresh_entry.config(state=tk.NORMAL)
+            apply_btn.config(state=tk.NORMAL)
             play_btn.config(state=tk.NORMAL)
             stop_btn.config(state=tk.DISABLED)
             test_btn.config(state=tk.NORMAL)
@@ -690,6 +730,8 @@ def tkinter_process(q):
         connect_btn.config(text="Connect", state=tk.NORMAL)
         port_combo.config(state=tk.NORMAL)
         baud_combo.config(state=tk.NORMAL)
+        refresh_entry.config(state=tk.DISABLED)
+        apply_btn.config(state=tk.DISABLED)
         play_btn.config(state=tk.DISABLED)
         stop_btn.config(state=tk.DISABLED)
         test_btn.config(state=tk.DISABLED)
@@ -728,7 +770,7 @@ def tkinter_process(q):
     def sender_loop(lights_q):
         last_send = time.time() - 1
         while sending:
-            if time.time() - last_send > 1.0:
+            if time.time() - last_send > send_interval:
                 lights = None
                 # Drain queue to get latest frame
                 while True:
@@ -812,6 +854,7 @@ def tkinter_process(q):
             disconnect()
 
     connect_btn.config(command=toggle_connect)
+    apply_btn.config(command=apply_refresh)
     play_btn.config(command=start_sending)
     stop_btn.config(command=stop_sending)
     test_btn.config(command=toggle_test)
