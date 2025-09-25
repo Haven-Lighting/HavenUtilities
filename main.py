@@ -415,6 +415,8 @@ def pygame_process(q):
                 lights = generate_melting_points(lights, melt_points, melt_color, melt_spacing, t)
                 t += 0.05
 
+            q.put(lights)
+
             light_width = max(MIN_LIGHT_SIZE, (screen.get_width() - (NUM_LIGHTS - 1) * SPACING) // NUM_LIGHTS)
             light_height = max(MIN_LIGHT_SIZE, screen.get_height() - CONTROL_HEIGHT - SPACING)
             screen.fill((10, 10, 10))
@@ -626,13 +628,17 @@ def tkinter_process(q):
     play_btn.pack(side=tk.LEFT, padx=5)
     stop_btn = tk.Button(button_frame, text="Stop", state=tk.DISABLED)
     stop_btn.pack(side=tk.LEFT, padx=5)
+    test_btn = tk.Button(button_frame, text="Test", state=tk.DISABLED)
+    test_btn.pack(side=tk.LEFT, padx=5)
 
     term_queue = qmod.Queue()
     ser = None
     connected = False
     sending = False
+    test_sending = False
     reader_thread = None
     sender_thread = None
+    test_thread = None
 
     def update_terminal():
         try:
@@ -661,6 +667,7 @@ def tkinter_process(q):
             baud_combo.config(state=tk.DISABLED)
             play_btn.config(state=tk.NORMAL)
             stop_btn.config(state=tk.DISABLED)
+            test_btn.config(state=tk.NORMAL)
             term_queue.put(f"Connected to {port} at {baud} baud")
             reader_thread = threading.Thread(target=reader_loop, daemon=True)
             reader_thread.start()
@@ -668,10 +675,13 @@ def tkinter_process(q):
             term_queue.put(f"Connection error: {e}")
 
     def disconnect():
-        nonlocal ser, connected, reader_thread, sender_thread, sending
+        nonlocal ser, connected, reader_thread, sender_thread, sending, test_thread, test_sending
         sending = False
+        test_sending = False
         if sender_thread and sender_thread.is_alive():
             sender_thread.join(timeout=1)
+        if test_thread and test_thread.is_alive():
+            test_thread.join(timeout=1)
         if reader_thread and reader_thread.is_alive():
             reader_thread.join(timeout=1)
         if ser and ser.is_open:
@@ -682,6 +692,8 @@ def tkinter_process(q):
         baud_combo.config(state=tk.NORMAL)
         play_btn.config(state=tk.DISABLED)
         stop_btn.config(state=tk.DISABLED)
+        test_btn.config(state=tk.DISABLED)
+        test_btn.config(text="Test")
         term_queue.put("Disconnected")
 
     def reader_loop():
@@ -714,31 +726,84 @@ def tkinter_process(q):
         term_queue.put("Stopped sending")
 
     def sender_loop(lights_q):
-        last_send = time.time() - 5
+        last_send = time.time() - 1
         while sending:
-            if time.time() - last_send > 5:
-                try:
-                    lights = lights_q.get(timeout=1)
-                    if lights is None:
+            if time.time() - last_send > 1.0:
+                lights = None
+                # Drain queue to get latest frame
+                while True:
+                    try:
+                        lights = lights_q.get_nowait()
+                        if lights is None:
+                            return
+                    except:
                         break
-                    packed = b''
-                    for r, g, b in lights:
-                        r16 = int(r / 255 * 65535)
-                        g16 = int(g / 255 * 65535)
-                        b16 = int(b / 255 * 65535)
-                        packed += struct.pack('>HHH', r16, g16, b16)
-                    colors_b64 = base64.b64encode(packed).decode()
-                    command = f'<LIGHTING.PUT0({{"colors_b64":"{colors_b64}"}})>'
-                    ser.write(command.encode())
-                    ser.flush()
-                    term_queue.put(f">> {command}")
-                    term_queue.put(f"Sent command ({len(lights)} LEDs)")
-                    last_send = time.time()
-                except qmod.Empty:
-                    pass
-                except Exception as e:
-                    term_queue.put(f"Send error: {e}")
-            time.sleep(0.1)
+                if lights is not None:
+                    try:
+                        packed = b''
+                        for r, g, b in lights:
+                            r16 = int(r / 255 * 65535)
+                            g16 = int(g / 255 * 65535)
+                            b16 = int(b / 255 * 65535)
+                            packed += struct.pack('>HHH', r16, g16, b16)
+                        colors_b64 = base64.b64encode(packed).decode()
+                        command = f'<LIGHTING.PUT0({{"colors_b64":"{colors_b64}"}})>'
+                        ser.write(command.encode())
+                        ser.flush()
+                        term_queue.put(f">> Sent frame ({len(lights)} LEDs)")
+                        last_send = time.time()
+                    except Exception as e:
+                        term_queue.put(f"Send error: {e}")
+            time.sleep(0.01)
+
+    def start_test():
+        nonlocal test_sending, test_thread
+        if connected and not test_sending:
+            test_sending = True
+            test_btn.config(text="Stop Test", state=tk.DISABLED)
+            term_queue.put("Starting test cycle...")
+            test_thread = threading.Thread(target=test_loop, daemon=True)
+            test_thread.start()
+
+    def stop_test():
+        nonlocal test_sending
+        test_sending = False
+        test_btn.config(text="Test", state=tk.NORMAL)
+        term_queue.put("Stopped test")
+
+    def toggle_test():
+        if not test_sending:
+            start_test()
+        else:
+            stop_test()
+
+    def test_loop():
+        color_patterns = [
+            [(255, 0, 0)] * 100,  # All red
+            [(0, 0, 255)] * 100,  # All blue
+            [(0, 255, 0)] * 100   # All green
+        ]
+        i = 0
+        while test_sending:
+            light_colors = color_patterns[i % 3]
+            packed = b''
+            for r, g, b in light_colors:
+                r16 = int(r / 255 * 65535)
+                g16 = int(g / 255 * 65535)
+                b16 = int(b / 255 * 65535)
+                packed += struct.pack('>HHH', r16, g16, b16)
+            colors_b64 = base64.b64encode(packed).decode()
+            command = f'<LIGHTING.PUT0({{"colors_b64":"{colors_b64}"}})>'
+            try:
+                ser.write(command.encode())
+                ser.flush()
+                term_queue.put(f">> {command}")
+                term_queue.put("Sent test color")
+            except Exception as e:
+                term_queue.put(f"Test send error: {e}")
+                break
+            i += 1
+            time.sleep(1)
 
     def toggle_connect():
         if not connected:
@@ -749,9 +814,10 @@ def tkinter_process(q):
     connect_btn.config(command=toggle_connect)
     play_btn.config(command=start_sending)
     stop_btn.config(command=stop_sending)
+    test_btn.config(command=toggle_test)
 
     root.after(100, update_terminal)
-    root.protocol("WM_DELETE_WINDOW", lambda: (stop_sending(), disconnect(), root.quit()))
+    root.protocol("WM_DELETE_WINDOW", lambda: (stop_sending(), stop_test(), disconnect(), root.quit()))
     root.mainloop()
 
 if __name__ == '__main__':
