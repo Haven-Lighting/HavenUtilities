@@ -15,6 +15,28 @@ from tkinter import ttk, scrolledtext
 import threading
 import queue as qmod
 
+def hsv_to_rgb(h, s, v):
+    h *= 360
+    if s == 0.0:
+        return int(v * 255), int(v * 255), int(v * 255)
+    i = int(h * 6.0) % 6
+    f = (h * 6.0) - int(h * 6.0)
+    p = v * (1 - s)
+    q = v * (1 - f * s)
+    t = v * (1 - (1 - f) * s)
+    if i == 0:
+        return int(v * 255), int(t * 255), int(p * 255)
+    if i == 1:
+        return int(q * 255), int(v * 255), int(p * 255)
+    if i == 2:
+        return int(p * 255), int(v * 255), int(t * 255)
+    if i == 3:
+        return int(p * 255), int(q * 255), int(v * 255)
+    if i == 4:
+        return int(t * 255), int(p * 255), int(v * 255)
+    if i == 5:
+        return int(v * 255), int(p * 255), int(q * 255)
+
 def get_available_ports():
     try:
         port_infos = serial.tools.list_ports.comports()
@@ -26,50 +48,11 @@ def get_available_ports():
         ports = [f"{p} - USB Serial Device (Fallback)" for p in ports if 'usbserial' in p or 'usbmodem' in p]
     return ports if ports else ["No ports available"]
 
-def rgb_to_hsv(r, g, b):
-    r, g, b = r / 255.0, g / 255.0, b / 255.0
-    mx = max(r, g, b)
-    mn = min(r, g, b)
-    df = mx - mn
-    if mx == mn:
-        h = 0
-    elif mx == r:
-        h = (60 * ((g - b) / df) + 360) % 360
-    elif mx == g:
-        h = (60 * ((b - r) / df + 2)) % 360
-    else:
-        h = (60 * ((r - g) / df + 4)) % 360
-    s = 0 if mx == 0 else df / mx
-    v = mx
-    return h / 360.0, s, v
-
-def hsv_to_rgb(h, s, v):
-    h *= 360
-    if s == 0:
-        return (int(v * 255), int(v * 255), int(v * 255))
-    i = int(h * 6.0) % 6
-    f = (h * 6.0) - int(h * 6.0)
-    p = v * (1 - s)
-    q = v * (1 - f * s)
-    t = v * (1 - (1 - f) * s)
-    if i == 0:
-        return (int(v * 255), int(t * 255), int(p * 255))
-    elif i == 1:
-        return (int(q * 255), int(v * 255), int(p * 255))
-    elif i == 2:
-        return (int(p * 255), int(v * 255), int(t * 255))
-    elif i == 3:
-        return (int(p * 255), int(q * 255), int(v * 255))
-    elif i == 4:
-        return (int(t * 255), int(p * 255), int(v * 255))
-    else:
-        return (int(v * 255), int(p * 255), int(q * 255))
-
 def pygame_process(q):
     pygame.init()
     INITIAL_WIDTH, INITIAL_HEIGHT = 1200, 200
     NUM_LIGHTS = 400
-    MIN_LIGHT_SIZE = 1
+    MIN_LIGHTS_SIZE = 1
     SPACING = 0
     CONTROL_HEIGHT = 200
     screen = pygame.display.set_mode((INITIAL_WIDTH, INITIAL_HEIGHT), pygame.RESIZABLE)
@@ -77,76 +60,75 @@ def pygame_process(q):
     font = pygame.font.SysFont("arial", 14, bold=True)
 
     # Effect settings
-    effects = ["Twinkle"]
-    selected_effect = "Twinkle"
+    effects = ["Strobe"]
+    selected_effect = "Strobe"
     effect_button_rect = pygame.Rect(20, INITIAL_HEIGHT - CONTROL_HEIGHT + 10, 120, 30)
     popup_open = False
     confirmation_timer = 0
     confirmation_effect = ""
-    twinkle_intensity = 1.0
-    twinkle_decay = 0.5
-    default_twinkle_colors = [(255, 0, 0), (255, 255, 255), (0, 0, 255)]
-    twinkle_colors = default_twinkle_colors.copy()
-    sparkles = []
+    speed = 250
+    fade = 50
+    color1_hue = 1/3.0  # green
+    color2_hue = 2/3.0  # blue
+    color3_hue = 0.0    # red
     slider_open = False
     slider_type = ""
-
-    # Color editing
-    color_edit_open = False
-    color_edit_button = None
-
-    # Color picker
-    picker_open = False
-    selected_color_for_picker = 0
-    current_hue = 0.0
-    current_sat = 1.0
-    current_val = 1.0
-    wheel_center = (0, 0)
-    wheel_radius = 100
-    preview_rect = None
-    sat_slider_rect = None
-    val_slider_rect = None
-    picker_save_rect = None
-    picker_cancel_rect = None
+    color_picker_open = False
+    selected_color_idx = 0
+    wheel_surf = None
+    speed_rect = None
+    fade_rect = None
+    hue1_rect = None
+    hue2_rect = None
+    hue3_rect = None
+    slider_rect = None
 
     # Control rectangles
-    def update_control_rects(width, height):
-        nonlocal effect_button_rect, color_edit_button, wheel_center, preview_rect, sat_slider_rect, val_slider_rect, picker_save_rect, picker_cancel_rect
+    def update_control_rects(height):
+        nonlocal effect_button_rect, speed_rect, fade_rect, hue1_rect, hue2_rect, hue3_rect, slider_rect
         effect_button_rect = pygame.Rect(20, height - CONTROL_HEIGHT + 10, 120, 30)
-        color_edit_button = pygame.Rect(20, height - CONTROL_HEIGHT + 90, 120, 30)
-        wheel_center = (width // 2, height // 2 - 50)
-        preview_rect = pygame.Rect(wheel_center[0] - 30, wheel_center[1] + 30, 60, 30)
-        sat_slider_rect = pygame.Rect(wheel_center[0] - 100, wheel_center[1] + 80, 200, 20)
-        val_slider_rect = pygame.Rect(wheel_center[0] - 100, wheel_center[1] + 110, 200, 20)
-        picker_save_rect = pygame.Rect(wheel_center[0] - 60, wheel_center[1] + 140, 50, 30)
-        picker_cancel_rect = pygame.Rect(wheel_center[0] + 10, wheel_center[1] + 140, 50, 30)
+        speed_rect = pygame.Rect(20, height - CONTROL_HEIGHT + 50, 120, 30)
+        fade_rect = pygame.Rect(20, height - CONTROL_HEIGHT + 90, 120, 30)
+        hue1_rect = pygame.Rect(160, height - CONTROL_HEIGHT + 10, 120, 30)
+        hue2_rect = pygame.Rect(160, height - CONTROL_HEIGHT + 50, 120, 30)
+        hue3_rect = pygame.Rect(160, height - CONTROL_HEIGHT + 90, 120, 30)
+        slider_rect = pygame.Rect(300, height - CONTROL_HEIGHT + 10, 120, 24)
 
-    update_control_rects(INITIAL_WIDTH, INITIAL_HEIGHT)
+    update_control_rects(INITIAL_HEIGHT)
 
-    def generate_twinkle(lights, t, intensity, decay, twinkle_colors):
-        nonlocal sparkles
-        current_time = t
-        num_new = int(100 * intensity * delta_time * 60)
-        for _ in range(num_new):
-            pos = random.randint(0, NUM_LIGHTS - 1)
-            color = random.choice(twinkle_colors)
-            start_time = current_time
-            sparkles.append({'pos': pos, 'color': color, 'start_time': start_time})
-        new_sparkles = []
-        for sparkle in sparkles:
-            age = current_time - sparkle['start_time']
-            fade = max(0, 1 - age / decay) if decay > 0 else 0
-            if fade > 0.01:
-                new_sparkles.append(sparkle)
-        sparkles = new_sparkles
-        lights = [(0, 0, 0) for _ in range(NUM_LIGHTS)]
-        for sparkle in sparkles:
-            age = current_time - sparkle['start_time']
-            fade = max(0, 1 - age / decay) if decay > 0 else 0
-            color = sparkle['color']
-            lights[sparkle['pos']] = (int(color[0] * fade),
-                                      int(color[1] * fade),
-                                      int(color[2] * fade))
+    def create_wheel():
+        surf = pygame.Surface((160, 160), pygame.SRCALPHA)
+        surf.fill((0, 0, 0, 0))
+        for i in range(360):
+            angle_rad = math.radians(i)
+            x = 80 + 80 * math.cos(angle_rad)
+            y = 80 + 80 * math.sin(angle_rad)
+            col = hsv_to_rgb(i / 360.0, 1.0, 1.0)
+            pygame.draw.circle(surf, col, (int(x), int(y)), 1)
+        return surf
+
+    def generate_strobe(lights, t, speed, fade, hues):
+        speed_frac = speed / 500.0
+        fade_frac = fade / 100.0
+        period = 0.3 / (speed_frac + 0.01)
+        phase_dur = period / 3.0
+        cycle_pos = (t % period) / period * 3.0
+        phase_index = int(cycle_pos)
+        local_t = cycle_pos % 1.0
+        up_frac = max(0.005, fade_frac * 0.5)
+        down_frac = up_frac
+        hold_frac = 1.0 - up_frac - down_frac
+        if local_t < up_frac:
+            bright = local_t / up_frac
+        elif local_t < up_frac + hold_frac:
+            bright = 1.0
+        else:
+            bright = 1.0 - (local_t - up_frac - hold_frac) / down_frac
+        h = hues[phase_index]
+        r, g, b = hsv_to_rgb(h, 1.0, bright)
+        color = (r, g, b)
+        for i in range(NUM_LIGHTS):
+            lights[i] = color
         return lights
 
     lights = [(0, 0, 0) for _ in range(NUM_LIGHTS)]
@@ -155,7 +137,6 @@ def pygame_process(q):
     clock = pygame.time.Clock()
     FPS = 60
     delta_time = 1.0 / FPS
-    mouse_pos = (0, 0)
 
     while running:
         try:
@@ -165,83 +146,105 @@ def pygame_process(q):
                     running = False
                 elif event.type == pygame.VIDEORESIZE:
                     screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE)
-                    update_control_rects(event.w, event.h)
+                    update_control_rects(screen.get_height())
                 elif event.type == pygame.MOUSEBUTTONDOWN:
-                    if picker_open:
-                        # Handle picker
-                        dx = event.pos[0] - wheel_center[0]
-                        dy = event.pos[1] - wheel_center[1]
-                        dist = math.sqrt(dx**2 + dy**2)
-                        if dist <= wheel_radius:
-                            angle = math.atan2(dy, dx)
-                            if angle < 0:
-                                angle += 2 * math.pi
-                            current_hue = angle / (2 * math.pi)
-                        elif sat_slider_rect.collidepoint(event.pos):
-                            current_sat = max(0, min(1, (event.pos[0] - sat_slider_rect.x) / sat_slider_rect.width))
-                        elif val_slider_rect.collidepoint(event.pos):
-                            current_val = max(0, min(1, (event.pos[0] - val_slider_rect.x) / val_slider_rect.width))
-                        elif picker_save_rect.collidepoint(event.pos):
-                            new_col = hsv_to_rgb(current_hue, current_sat, current_val)
-                            twinkle_colors[selected_color_for_picker] = (int(new_col[0]), int(new_col[1]), int(new_col[2]))
-                            picker_open = False
-                        elif picker_cancel_rect.collidepoint(event.pos):
-                            picker_open = False
-                    else:
-                        if effect_button_rect.collidepoint(event.pos):
-                            popup_open = not popup_open
-                            slider_open = False
-                            color_edit_open = False
-                        elif popup_open:
-                            popup_width, popup_height = 120, len(effects) * 30 + 10
-                            popup_x, popup_y = (screen.get_width() - popup_width) // 2, (screen.get_height() - popup_height) // 2
-                            for i, effect in enumerate(effects):
-                                rect = pygame.Rect(popup_x, popup_y + 10 + i * 30, 120, 30)
-                                if rect.collidepoint(event.pos):
-                                    selected_effect = effect
-                                    confirmation_effect = effect
-                                    confirmation_timer = 60
-                                    popup_open = False
-                                    slider_open = False
-                                    color_edit_open = False
-                        elif color_edit_button.collidepoint(event.pos):
-                            color_edit_open = not color_edit_open
-                            slider_open = False
-                            popup_open = False
-                        elif color_edit_open:
-                            for i in range(3):
-                                cx = 20 + i * 70
-                                cy = screen.get_height() - CONTROL_HEIGHT + 130
-                                color_rect = pygame.Rect(cx, cy, 60, 30)
-                                if color_rect.collidepoint(event.pos):
-                                    selected_color_for_picker = i
-                                    h, s, v = rgb_to_hsv(*twinkle_colors[i])
-                                    current_hue, current_sat, current_val = h, s, v
-                                    picker_open = True
-                        elif selected_effect == "Twinkle":
-                            if twinkle_intensity_rect.collidepoint(event.pos):
-                                slider_open = not slider_open
-                                slider_type = "twinkle_intensity"
-                                color_edit_open = False
-                            elif twinkle_decay_rect.collidepoint(event.pos):
-                                slider_open = not slider_open
-                                slider_type = "twinkle_decay"
-                                color_edit_open = False
-                            elif slider_open:
-                                slider_pos = (event.pos[0] - slider_rect.x) / slider_rect.width
-                                if slider_type == "twinkle_intensity":
-                                    twinkle_intensity = slider_pos * 1.0
-                                elif slider_type == "twinkle_decay":
-                                    twinkle_decay = slider_pos * 1.0
+                    if effect_button_rect.collidepoint(event.pos):
+                        popup_open = not popup_open
+                        slider_open = False
+                        color_picker_open = False
+                    elif popup_open:
+                        popup_width, popup_height = 120, len(effects) * 30 + 10
+                        popup_x, popup_y = (screen.get_width() - popup_width) // 2, (screen.get_height() - popup_height) // 2
+                        for i, effect in enumerate(effects):
+                            rect = pygame.Rect(popup_x, popup_y + 10 + i * 30, 120, 30)
+                            if rect.collidepoint(event.pos):
+                                selected_effect = effect
+                                confirmation_effect = effect
+                                confirmation_timer = 60
+                                popup_open = False
+                                slider_open = False
+                                color_picker_open = False
+                    elif selected_effect == "Strobe":
+                        if speed_rect.collidepoint(event.pos):
+                            slider_open = not slider_open
+                            slider_type = "speed"
+                            color_picker_open = False
+                        elif fade_rect.collidepoint(event.pos):
+                            slider_open = not slider_open
+                            slider_type = "fade"
+                            color_picker_open = False
+                        elif hue1_rect.collidepoint(event.pos):
+                            if color_picker_open and selected_color_idx == 0:
+                                color_picker_open = False
+                                wheel_surf = None
+                            else:
+                                color_picker_open = True
+                                selected_color_idx = 0
+                                slider_open = False
+                                if wheel_surf is None:
+                                    wheel_surf = create_wheel()
+                        elif hue2_rect.collidepoint(event.pos):
+                            if color_picker_open and selected_color_idx == 1:
+                                color_picker_open = False
+                                wheel_surf = None
+                            else:
+                                color_picker_open = True
+                                selected_color_idx = 1
+                                slider_open = False
+                                if wheel_surf is None:
+                                    wheel_surf = create_wheel()
+                        elif hue3_rect.collidepoint(event.pos):
+                            if color_picker_open and selected_color_idx == 2:
+                                color_picker_open = False
+                                wheel_surf = None
+                            else:
+                                color_picker_open = True
+                                selected_color_idx = 2
+                                slider_open = False
+                                if wheel_surf is None:
+                                    wheel_surf = create_wheel()
+                        elif slider_open and slider_rect.collidepoint(event.pos) and slider_type in ["speed", "fade"]:
+                            slider_pos = (event.pos[0] - slider_rect.x) / slider_rect.width
+                            if slider_type == "speed":
+                                speed = int(slider_pos * 500)
+                            elif slider_type == "fade":
+                                fade = int(slider_pos * 100)
+                        if color_picker_open:
+                            popup_width = 200
+                            popup_height = 200
+                            popup_x = (screen.get_width() - popup_width) // 2
+                            popup_y = (screen.get_height() - popup_height) // 2
+                            close_rect = pygame.Rect(popup_x + 170, popup_y + 10, 20, 20)
+                            if close_rect.collidepoint(event.pos):
+                                color_picker_open = False
+                                wheel_surf = None
+                            else:
+                                center = (popup_x + 100, popup_y + 100)
+                                mx, my = event.pos
+                                dx = mx - center[0]
+                                dy = my - center[1]
+                                dist_sq = dx * dx + dy * dy
+                                if dist_sq <= 80 * 80:
+                                    angle = math.atan2(dy, dx)
+                                    h = math.degrees(angle) / 360.0
+                                    if h < 0:
+                                        h += 1.0
+                                    if selected_color_idx == 0:
+                                        color1_hue = h
+                                    elif selected_color_idx == 1:
+                                        color2_hue = h
+                                    else:
+                                        color3_hue = h
 
-            if selected_effect == "Twinkle":
-                lights = generate_twinkle(lights, t, twinkle_intensity, twinkle_decay, twinkle_colors)
+            if selected_effect == "Strobe":
+                hues = [color1_hue, color2_hue, color3_hue]
+                lights = generate_strobe(lights, t, speed, fade, hues)
                 t += delta_time
 
             q.put(lights)
 
-            light_width = max(MIN_LIGHT_SIZE, (screen.get_width() - (NUM_LIGHTS - 1) * SPACING) // NUM_LIGHTS)
-            light_height = max(MIN_LIGHT_SIZE, screen.get_height() - CONTROL_HEIGHT - SPACING)
+            light_width = max(MIN_LIGHTS_SIZE, (screen.get_width() - (NUM_LIGHTS - 1) * SPACING) // NUM_LIGHTS)
+            light_height = max(MIN_LIGHTS_SIZE, screen.get_height() - CONTROL_HEIGHT - SPACING)
             screen.fill((10, 10, 10))
             for i, color in enumerate(lights):
                 x = i * (light_width + SPACING)
@@ -265,90 +268,75 @@ def pygame_process(q):
                     screen.blit(text, (popup_x + 10, popup_y + 15 + i * 30))
             if confirmation_timer > 0:
                 confirmation_text = font.render(f"Selected: {confirmation_effect}", True, (255, 255, 255))
-                text_width, _ = font.size(f"Selected: {confirmation_effect}")
+                text_width, text_height = font.size(f"Selected: {confirmation_effect}")
                 confirm_rect = pygame.Rect((screen.get_width() - text_width - 20) // 2, (screen.get_height() - 40) // 2, text_width + 20, 40)
                 pygame.draw.rect(screen, (37, 99, 235), confirm_rect, border_radius=8)
                 pygame.draw.rect(screen, (209, 213, 219), confirm_rect, 1, border_radius=8)
                 screen.blit(confirmation_text, (confirm_rect.x + 10, confirm_rect.y + 12))
                 confirmation_timer -= 1
-            if selected_effect == "Twinkle":
-                twinkle_intensity_rect = pygame.Rect(160, screen.get_height() - CONTROL_HEIGHT + 10, 120, 30)
-                twinkle_decay_rect = pygame.Rect(160, screen.get_height() - CONTROL_HEIGHT + 50, 120, 30)
-                slider_rect = pygame.Rect(440, screen.get_height() - CONTROL_HEIGHT + 10, 120, 24)
-                pygame.draw.rect(screen, (59, 130, 246) if twinkle_intensity_rect.collidepoint(mouse_pos) else (37, 99, 235), twinkle_intensity_rect, border_radius=8)
-                pygame.draw.rect(screen, (209, 213, 219), twinkle_intensity_rect, 1, border_radius=8)
-                text = font.render(f"Intensity: {twinkle_intensity:.2f}", True, (255, 255, 255))
-                screen.blit(text, (170, screen.get_height() - CONTROL_HEIGHT + 15))
-                pygame.draw.rect(screen, (59, 130, 246) if twinkle_decay_rect.collidepoint(mouse_pos) else (37, 99, 235), twinkle_decay_rect, border_radius=8)
-                pygame.draw.rect(screen, (209, 213, 219), twinkle_decay_rect, 1, border_radius=8)
-                text = font.render(f"Decay: {twinkle_decay:.2f}", True, (255, 255, 255))
-                screen.blit(text, (170, screen.get_height() - CONTROL_HEIGHT + 55))
-                pygame.draw.rect(screen, (59, 130, 246) if color_edit_button.collidepoint(mouse_pos) else (37, 99, 235), color_edit_button, border_radius=8)
-                pygame.draw.rect(screen, (209, 213, 219), color_edit_button, 1, border_radius=8)
-                text = font.render("Edit Colors", True, (255, 255, 255))
-                screen.blit(text, (30, screen.get_height() - CONTROL_HEIGHT + 95))
-                if color_edit_open and not picker_open:
-                    for i in range(3):
-                        cx = 20 + i * 70
-                        cy = screen.get_height() - CONTROL_HEIGHT + 130
-                        color_rect = pygame.Rect(cx, cy, 60, 30)
-                        col = twinkle_colors[i]
-                        pygame.draw.rect(screen, col, color_rect)
-                        pygame.draw.rect(screen, (209, 213, 219), color_rect, 1, border_radius=8)
-                        txt_col = (0, 0, 0) if sum(col) > 500 else (255, 255, 255)
-                        text = font.render(f"C{i+1}", True, txt_col)
-                        screen.blit(text, (cx + 18, cy + 7))
-                if slider_open and not color_edit_open:
+            if selected_effect == "Strobe":
+                # Speed
+                pygame.draw.rect(screen, (59, 130, 246) if speed_rect.collidepoint(mouse_pos) else (37, 99, 235), speed_rect, border_radius=8)
+                pygame.draw.rect(screen, (209, 213, 219), speed_rect, 1, border_radius=8)
+                text = font.render(f"Speed: {speed:.0f}", True, (255, 255, 255))
+                screen.blit(text, (speed_rect.x + 10, speed_rect.y + 8))
+                # Fade
+                pygame.draw.rect(screen, (59, 130, 246) if fade_rect.collidepoint(mouse_pos) else (37, 99, 235), fade_rect, border_radius=8)
+                pygame.draw.rect(screen, (209, 213, 219), fade_rect, 1, border_radius=8)
+                text = font.render(f"Fade: {fade:.0f}", True, (255, 255, 255))
+                screen.blit(text, (fade_rect.x + 10, fade_rect.y + 8))
+                # Color 1
+                pygame.draw.rect(screen, (59, 130, 246) if hue1_rect.collidepoint(mouse_pos) else (37, 99, 235), hue1_rect, border_radius=8)
+                pygame.draw.rect(screen, (209, 213, 219), hue1_rect, 1, border_radius=8)
+                text = font.render("Color 1", True, (255, 255, 255))
+                screen.blit(text, (hue1_rect.x + 10, hue1_rect.y + 8))
+                c1 = hsv_to_rgb(color1_hue, 1.0, 1.0)
+                color_rect1 = pygame.Rect(hue1_rect.x + 90, hue1_rect.y + 5, 20, 20)
+                pygame.draw.rect(screen, c1, color_rect1, border_radius=4)
+                # Color 2
+                pygame.draw.rect(screen, (59, 130, 246) if hue2_rect.collidepoint(mouse_pos) else (37, 99, 235), hue2_rect, border_radius=8)
+                pygame.draw.rect(screen, (209, 213, 219), hue2_rect, 1, border_radius=8)
+                text = font.render("Color 2", True, (255, 255, 255))
+                screen.blit(text, (hue2_rect.x + 10, hue2_rect.y + 8))
+                c2 = hsv_to_rgb(color2_hue, 1.0, 1.0)
+                color_rect2 = pygame.Rect(hue2_rect.x + 90, hue2_rect.y + 5, 20, 20)
+                pygame.draw.rect(screen, c2, color_rect2, border_radius=4)
+                # Color 3
+                pygame.draw.rect(screen, (59, 130, 246) if hue3_rect.collidepoint(mouse_pos) else (37, 99, 235), hue3_rect, border_radius=8)
+                pygame.draw.rect(screen, (209, 213, 219), hue3_rect, 1, border_radius=8)
+                text = font.render("Color 3", True, (255, 255, 255))
+                screen.blit(text, (hue3_rect.x + 10, hue3_rect.y + 8))
+                c3 = hsv_to_rgb(color3_hue, 1.0, 1.0)
+                color_rect3 = pygame.Rect(hue3_rect.x + 90, hue3_rect.y + 5, 20, 20)
+                pygame.draw.rect(screen, c3, color_rect3, border_radius=4)
+                if slider_open and slider_type in ["speed", "fade"]:
                     pygame.draw.rect(screen, (31, 41, 55), slider_rect, border_radius=6)
                     pygame.draw.rect(screen, (209, 213, 219), slider_rect, 1, border_radius=6)
-                    slider_pos = twinkle_intensity / 1.0 if slider_type == "twinkle_intensity" else twinkle_decay / 1.0
+                    val = speed if slider_type == "speed" else fade
+                    slider_pos = (val / 500.0) if slider_type == "speed" else (val / 100.0)
                     knob_x = slider_rect.x + slider_pos * slider_rect.width
                     pygame.draw.circle(screen, (59, 130, 246), (int(knob_x), slider_rect.centery), 8)
-            if picker_open:
-                overlay = pygame.Surface((screen.get_width(), screen.get_height()))
-                overlay.set_alpha(128)
-                overlay.fill((0, 0, 0))
-                screen.blit(overlay, (0, 0))
-                # Draw wheel
-                for angle in range(360):
-                    hh = angle / 360.0
-                    col = hsv_to_rgb(hh, 1.0, 1.0)
-                    start_angle = math.radians(angle - 0.5)
-                    end_angle = math.radians(angle + 0.5)
-                    x1 = wheel_center[0] + wheel_radius * math.cos(start_angle)
-                    y1 = wheel_center[1] + wheel_radius * math.sin(start_angle)
-                    x2 = wheel_center[0] + wheel_radius * math.cos(end_angle)
-                    y2 = wheel_center[1] + wheel_radius * math.sin(end_angle)
-                    pygame.draw.line(screen, col, (x1, y1), (x2, y2), 2)
-                # Hue selector
-                hue_angle = math.radians(current_hue * 360)
-                hx = wheel_center[0] + wheel_radius * math.cos(hue_angle)
-                hy = wheel_center[1] + wheel_radius * math.sin(hue_angle)
-                pygame.draw.circle(screen, (255, 255, 255), (int(hx), int(hy)), 5, 2)
-                # Preview
-                preview_col = hsv_to_rgb(current_hue, current_sat, current_val)
-                pygame.draw.rect(screen, preview_col, preview_rect)
-                pygame.draw.rect(screen, (255, 255, 255), preview_rect, 2)
-                # Sat slider
-                pygame.draw.rect(screen, (50, 50, 50), sat_slider_rect)
-                pygame.draw.rect(screen, (255, 255, 255), sat_slider_rect, 1)
-                sat_pos = sat_slider_rect.x + current_sat * sat_slider_rect.width
-                pygame.draw.circle(screen, (255, 0, 0), (int(sat_pos), sat_slider_rect.centery), 8)
-                # Val slider
-                pygame.draw.rect(screen, (50, 50, 50), val_slider_rect)
-                pygame.draw.rect(screen, (255, 255, 255), val_slider_rect, 1)
-                val_pos = val_slider_rect.x + current_val * val_slider_rect.width
-                pygame.draw.circle(screen, (0, 255, 0), (int(val_pos), val_slider_rect.centery), 8)
-                # Save
-                pygame.draw.rect(screen, (0, 255, 0) if picker_save_rect.collidepoint(mouse_pos) else (0, 200, 0), picker_save_rect, border_radius=4)
-                pygame.draw.rect(screen, (255, 255, 255), picker_save_rect, 1, border_radius=4)
-                text = font.render("Save", True, (255, 255, 255))
-                screen.blit(text, (picker_save_rect.x + 10, picker_save_rect.y + 7))
-                # Cancel
-                pygame.draw.rect(screen, (255, 0, 0) if picker_cancel_rect.collidepoint(mouse_pos) else (200, 0, 0), picker_cancel_rect, border_radius=4)
-                pygame.draw.rect(screen, (255, 255, 255), picker_cancel_rect, 1, border_radius=4)
-                text = font.render("Cancel", True, (255, 255, 255))
-                screen.blit(text, (picker_cancel_rect.x + 5, picker_cancel_rect.y + 7))
+                if color_picker_open:
+                    popup_width = 200
+                    popup_height = 200
+                    popup_x = (screen.get_width() - popup_width) // 2
+                    popup_y = (screen.get_height() - popup_height) // 2
+                    pygame.draw.rect(screen, (37, 99, 235), (popup_x, popup_y, popup_width, popup_height), border_radius=8)
+                    pygame.draw.rect(screen, (209, 213, 219), (popup_x, popup_y, popup_width, popup_height), 1, border_radius=8)
+                    center = (popup_x + 100, popup_y + 100)
+                    screen.blit(wheel_surf, (center[0] - 80, center[1] - 80))
+                    h = [color1_hue, color2_hue, color3_hue][selected_color_idx]
+                    angle = math.radians(h * 360)
+                    ix = 80 + 80 * math.cos(angle)
+                    iy = 80 + 80 * math.sin(angle)
+                    sx = center[0] - 80 + ix
+                    sy = center[1] - 80 + iy
+                    pygame.draw.circle(screen, (255, 0, 0), (int(sx), int(sy)), 5, 3)
+                    close_rect = pygame.Rect(popup_x + 170, popup_y + 10, 20, 20)
+                    pygame.draw.rect(screen, (255, 0, 0), close_rect, border_radius=4)
+                    font_small = pygame.font.SysFont("arial", 12, bold=True)
+                    text_close = font_small.render("X", True, (255, 255, 255))
+                    screen.blit(text_close, (close_rect.x + 6, close_rect.y + 4))
 
             pygame.display.flip()
             clock.tick(FPS)
