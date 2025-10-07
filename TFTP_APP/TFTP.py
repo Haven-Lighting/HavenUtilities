@@ -320,6 +320,7 @@ class TFTPUDPApp:
         self.progress.pack(pady=5, before=self.tftp_text)
         self.progress.start()
         self.tftp_msg_queue.put("Sending...\n")
+        # Testing
     
     def stop_sending(self):
         self.sending = False
