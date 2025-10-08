@@ -10,207 +10,6 @@ import binascii
 import random
 import time
 
-class TFTPListenPopup:
-    def __init__(self, parent):
-        self.parent = parent
-        self.popup = tk.Toplevel(parent.root)
-        self.popup.title("TFTP Listen")
-        self.popup.geometry("400x300")
-        self.popup.configure(bg='black')
-        
-        tk.Label(self.popup, text="Listen IP:", fg='white', bg='black').pack(pady=5)
-        self.listen_ip = tk.Entry(self.popup, width=20, bg='#404040', fg='white', insertbackground='white')
-        self.listen_ip.pack(pady=5)
-        self.listen_ip.insert(0, "10.10.2.46")  # Your Mac IP
-        
-        tk.Label(self.popup, text="Output File:", fg='white', bg='black').pack(pady=5)
-        self.output_entry = tk.Entry(self.popup, width=50, bg='#404040', fg='white', insertbackground='white')
-        self.output_entry.pack(pady=5)
-        self.output_entry.insert(0, "received.bin")
-        
-        self.start_btn = tk.Button(self.popup, text="Start Listen", command=self.start_listen, bg='#404040', fg='black', relief='flat')
-        self.start_btn.pack(pady=10)
-        
-        self.tftp_text = scrolledtext.ScrolledText(self.popup, height=15, state='disabled', bg='black', fg='white', insertbackground='white', font=('Arial', 12))
-        self.tftp_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        self.tftp_sock = None
-        self.tftp_running = False
-        self.msg_queue = queue.Queue()
-        self.poll_queue()
-        #testing testing 123
-    
-    def poll_queue(self):
-        try:
-            while True:
-                msg = self.msg_queue.get_nowait()
-                self.tftp_text.config(state='normal')
-                self.tftp_text.insert(tk.END, msg)
-                self.tftp_text.config(state='disabled')
-                self.tftp_text.see(tk.END)
-        except queue.Empty:
-            pass
-        self.popup.after(100, self.poll_queue)
-    
-    def start_listen(self):
-        if not self.tftp_running:
-            ip = self.listen_ip.get()
-            filename = self.output_entry.get()
-            try:
-                self.tftp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                self.tftp_sock.bind((ip, 69))
-                self.tftp_running = True
-                self.start_btn.config(text="Stop Listen")
-                self.tftp_thread = threading.Thread(target=self.tftp_server, args=(filename,), daemon=True)
-                self.tftp_thread.start()
-                self.msg_queue.put(f"Listening for TFTP on {ip}:69\n")
-            except Exception as e:
-                messagebox.showerror("Error", str(e))
-        else:
-            self.tftp_running = False
-            if self.tftp_sock:
-                self.tftp_sock.close()
-            self.start_btn.config(text="Start Listen")
-            self.msg_queue.put("Stopped listening\n")
-    
-    def tftp_server(self, out_filename):
-        while self.tftp_running:
-            try:
-                data, addr = self.tftp_sock.recvfrom(1024)
-                opcode = struct.unpack('!H', data[:2])[0]
-                if opcode == 2:  # WRQ
-                    # Parse filename and mode
-                    filename_end = data[2:].find(b'\0')
-                    filename_req = data[2:2 + filename_end].decode()
-                    mode_start = 2 + filename_end + 1
-                    mode_end_rel = data[mode_start:].find(b'\0')
-                    mode_end = mode_start + mode_end_rel
-                    mode = data[mode_start:mode_end].decode()
-                    
-                    self.msg_queue.put(f"WRQ from {addr}: {filename_req} ({mode})\n")
-                    
-                    # Parse options
-                    opt_data = data[mode_end + 1:]
-                    expected_size = None
-                    while len(opt_data) > 0:
-                        key_end = opt_data.find(b'\0')
-                        if key_end == -1:
-                            break
-                        key = opt_data[:key_end].decode()
-                        opt_data = opt_data[key_end + 1:]
-                        val_end = opt_data.find(b'\0')
-                        if val_end == -1:
-                            break
-                        val = opt_data[:val_end].decode()
-                        opt_data = opt_data[val_end + 1:]
-                        if key == 'size':
-                            expected_size = int(val)
-                    
-                    # Send OACK or ACK 0
-                    if expected_size is not None:
-                        oack = struct.pack('!H', 6) + b'size\0' + str(expected_size).encode() + b'\0'
-                        self.tftp_sock.sendto(oack, addr)
-                        self.msg_queue.put(f"Sent OACK with expected size {expected_size}\n")
-                    else:
-                        ack = struct.pack('!HH', 4, 0)
-                        self.tftp_sock.sendto(ack, addr)
-                    
-                    # Open file and receive
-                    total_received = 0
-                    expected_blocks = []
-                    received_blocks = []
-                    missing_blocks = []
-                    
-                    with open(out_filename, 'wb') as f:
-                        block_num = 1
-                        consecutive_missing = 0
-                        last_received_block = 0
-                        
-                        while self.tftp_running:
-                            try:
-                                # Set a timeout for receiving packets
-                                self.tftp_sock.settimeout(5.0)
-                                data_pkt, addr_check = self.tftp_sock.recvfrom(1024)
-                                self.tftp_sock.settimeout(None)
-                            except socket.timeout:
-                                # Timeout waiting for packet - might be missing blocks
-                                if expected_size is not None and total_received < expected_size:
-                                    missing_bytes = expected_size - total_received
-                                    self.msg_queue.put(f"⚠️ TIMEOUT: Expected more data. Missing approximately {missing_bytes} bytes.\n")
-                                    self.msg_queue.put(f"⚠️ This file appears to be CORRUPTED - some packets were not received!\n")
-                                    self.msg_queue.put(f"⚠️ Please request the sender to send the file again.\n")
-                                break
-                                
-                            if addr_check != addr:
-                                continue
-                            pkt_opcode = struct.unpack('!H', data_pkt[:2])[0]
-                            if pkt_opcode != 3:  # DATA
-                                break
-                            block = struct.unpack('!H', data_pkt[2:4])[0]
-                            
-                            # Check for missing blocks
-                            if block != block_num:
-                                if block > block_num:
-                                    # We're missing some blocks
-                                    for missing in range(block_num, block):
-                                        missing_blocks.append(missing)
-                                        self.msg_queue.put(f"⚠️ MISSING BLOCK {missing}! Expected {block_num}, received {block}\n")
-                                    consecutive_missing = block - block_num
-                                    block_num = block
-                                else:
-                                    # Duplicate or out-of-order block
-                                    self.msg_queue.put(f"⚠️ Duplicate/out-of-order block {block}, expected {block_num}\n")
-                                    continue
-                            
-                            received_blocks.append(block)
-                            filedata = data_pkt[4:]
-                            f.write(filedata)
-                            total_received += len(filedata)
-                            last_received_block = block
-                            
-                            if missing_blocks:
-                                self.msg_queue.put(f"Received block {block_num} ({len(filedata)} bytes) - GAPS DETECTED\n")
-                            else:
-                                self.msg_queue.put(f"Received block {block_num}, {len(filedata)} bytes\n")
-                            
-                            # ACK
-                            ack_pkt = struct.pack('!HH', 4, block_num)
-                            self.tftp_sock.sendto(ack_pkt, addr)
-                            block_num += 1
-                            
-                            if len(filedata) < 512:
-                                break
-                    
-                    # Final corruption check
-                    if missing_blocks:
-                        self.msg_queue.put(f"\n🚨 FILE CORRUPTION DETECTED! 🚨\n")
-                        self.msg_queue.put(f"Missing blocks: {missing_blocks}\n")
-                        self.msg_queue.put(f"Missing approximately {len(missing_blocks) * 512} bytes of data.\n")
-                        self.msg_queue.put(f"⚠️ This file is CORRUPTED and should not be used!\n")
-                        self.msg_queue.put(f"⚠️ Please request the sender to resend the file.\n\n")
-                    
-                    # Check size if expected
-                    if expected_size is not None:
-                        if total_received != expected_size:
-                            missing_bytes = expected_size - total_received
-                            self.msg_queue.put(f"🚨 SIZE MISMATCH DETECTED! 🚨\n")
-                            self.msg_queue.put(f"Expected {expected_size} bytes, received {total_received} bytes\n")
-                            self.msg_queue.put(f"Missing {missing_bytes} bytes - FILE IS CORRUPTED!\n")
-                            self.msg_queue.put(f"⚠️ Please request the sender to send the file again.\n")
-                        else:
-                            if missing_blocks:
-                                self.msg_queue.put(f"File size matches expected ({total_received} bytes) but blocks are missing - FILE IS STILL CORRUPTED!\n")
-                            else:
-                                self.msg_queue.put(f"File received successfully: {out_filename} ({total_received} bytes, matches expected)\n")
-                    else:
-                        if missing_blocks:
-                            self.msg_queue.put(f"File received: {out_filename} ({total_received} bytes) - ⚠️ BUT CORRUPTED DUE TO MISSING BLOCKS!\n")
-                        else:
-                            self.msg_queue.put(f"File received: {out_filename} ({total_received} bytes)\n")
-            except Exception as e:
-                if self.tftp_running:
-                    self.msg_queue.put(f"Error: {str(e)}\n")
-
 class UDPWritePopup:
     def __init__(self, parent):
         self.parent = parent
@@ -262,37 +61,73 @@ class TFTPUDPApp:
         self.tftp_msg_queue = queue.Queue()
         self.corrupt_mode = False
         self.blocks_to_skip = set()
+        self.tftp_mode = "send"  # "send" or "listen"
+        self.tftp_listening = False
+        self.tftp_listen_thread = None
         
-        # Top half: TFTP Sender
+        # Top half: TFTP Panel
         self.tftp_frame = tk.Frame(root, height=300, bg='#2c2c2c')
         self.tftp_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
         
         tk.Label(self.tftp_frame, text="TFTP", font=('Arial', 16), fg='white', bg='#2c2c2c').pack(pady=10)
         
+        # Mode toggle frame
+        mode_frame = tk.Frame(self.tftp_frame, bg='#2c2c2c')
+        mode_frame.pack(pady=5)
+        tk.Label(mode_frame, text="Mode:", fg='white', bg='#2c2c2c').pack(side=tk.LEFT, padx=5)
+        self.mode_var = tk.StringVar(value="send")
+        self.send_radio = tk.Radiobutton(mode_frame, text="Send", variable=self.mode_var, value="send", 
+                                         command=self.switch_mode, bg='#2c2c2c', fg='white', 
+                                         selectcolor='#404040', activebackground='#2c2c2c')
+        self.send_radio.pack(side=tk.LEFT, padx=5)
+        self.listen_radio = tk.Radiobutton(mode_frame, text="Listen", variable=self.mode_var, value="listen", 
+                                           command=self.switch_mode, bg='#2c2c2c', fg='white', 
+                                           selectcolor='#404040', activebackground='#2c2c2c')
+        self.listen_radio.pack(side=tk.LEFT, padx=5)
+        
+        # IP address frame
         ip_frame = tk.Frame(self.tftp_frame, bg='#2c2c2c')
         ip_frame.pack(pady=5)
-        tk.Label(ip_frame, text="Target IP:", fg='white', bg='#2c2c2c').pack(side=tk.LEFT)
+        self.ip_label = tk.Label(ip_frame, text="Target IP:", fg='white', bg='#2c2c2c')
+        self.ip_label.pack(side=tk.LEFT)
         self.ip_entry = tk.Entry(ip_frame, width=20, bg='#404040', fg='white', insertbackground='white', font=('Arial', 12))
         self.ip_entry.pack(side=tk.LEFT, padx=5)
-        self.ip_entry.insert(0, "10.10.2.46")  # Your Mac IP
+        self.ip_entry.insert(0, "10.10.2.46")
         
-        file_frame = tk.Frame(self.tftp_frame, bg='#2c2c2c')
+        # Send mode controls
+        self.send_frame = tk.Frame(self.tftp_frame, bg='#2c2c2c')
+        self.send_frame.pack(pady=5)
+        
+        file_frame = tk.Frame(self.send_frame, bg='#2c2c2c')
         file_frame.pack(pady=5)
         tk.Label(file_frame, text="File:", fg='white', bg='#2c2c2c').pack(side=tk.LEFT)
         self.file_entry = tk.Entry(file_frame, width=40, bg='#404040', fg='white', insertbackground='white', font=('Arial', 12))
         self.file_entry.pack(side=tk.LEFT, padx=5)
         tk.Button(file_frame, text="Browse", command=self.browse_file, bg='#404040', fg='black', relief='flat').pack(side=tk.LEFT, padx=5)
         
-        btn_frame = tk.Frame(self.tftp_frame, bg='#2c2c2c')
+        btn_frame = tk.Frame(self.send_frame, bg='#2c2c2c')
         btn_frame.pack(pady=10)
-        self.normal_send_btn = tk.Button(btn_frame, text="TFTP Send", command=self.normal_send_tftp, bg='#1a1a1a', fg='black', relief='flat')
+        self.normal_send_btn = tk.Button(btn_frame, text="TFTP Send", command=self.normal_send_tftp, bg='#1a1a1a', fg='white', relief='flat')
         self.normal_send_btn.pack(side=tk.LEFT, padx=5)
         self.corrupt_send_btn = tk.Button(btn_frame, text="TFTP Corrupt Send", command=self.corrupt_send_tftp, bg='#ffaa00', fg='black', relief='flat')
         self.corrupt_send_btn.pack(side=tk.LEFT, padx=5)
         self.swap_send_btn = tk.Button(btn_frame, text="TFTP Swap Send", command=self.swap_send_tftp, bg='#00ff00', fg='black', relief='flat')
         self.swap_send_btn.pack(side=tk.LEFT, padx=5)
-        self.listen_btn = tk.Button(btn_frame, text="TFTP Listen", command=self.open_listen_popup, bg='#1a1a1a', fg='black', relief='flat')
-        self.listen_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Listen mode controls
+        self.listen_frame = tk.Frame(self.tftp_frame, bg='#2c2c2c')
+        
+        output_frame = tk.Frame(self.listen_frame, bg='#2c2c2c')
+        output_frame.pack(pady=5)
+        tk.Label(output_frame, text="Output File:", fg='white', bg='#2c2c2c').pack(side=tk.LEFT)
+        self.output_entry = tk.Entry(output_frame, width=40, bg='#404040', fg='white', insertbackground='white', font=('Arial', 12))
+        self.output_entry.pack(side=tk.LEFT, padx=5)
+        self.output_entry.insert(0, "received.bin")
+        
+        listen_btn_frame = tk.Frame(self.listen_frame, bg='#2c2c2c')
+        listen_btn_frame.pack(pady=10)
+        self.start_listen_btn = tk.Button(listen_btn_frame, text="Start Listen", command=self.toggle_listen, bg='#1a1a1a', fg='white', relief='flat')
+        self.start_listen_btn.pack(side=tk.LEFT, padx=5)
         
         # Abort button frame and progress, initially not packed
         self.abort_frame = tk.Frame(self.tftp_frame, bg='#2c2c2c')
@@ -305,6 +140,9 @@ class TFTPUDPApp:
         self.tftp_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
         self.poll_tftp_queue()
+        
+        # Initialize to send mode
+        self.switch_mode()
         
         # Bottom half: UDP Terminal
         self.udp_frame = tk.Frame(root, height=300, bg='#1a1a1a')
@@ -347,8 +185,221 @@ class TFTPUDPApp:
             pass
         self.root.after(100, self.poll_tftp_queue)
     
+    def get_local_ip(self):
+        """Get the local IP address of this computer"""
+        try:
+            # Create a socket to get the local IP
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            # Connect to a public DNS server (doesn't actually send data)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+            return local_ip
+        except:
+            return "127.0.0.1"
+    
+    def switch_mode(self):
+        """Switch between Send and Listen modes"""
+        mode = self.mode_var.get()
+        self.tftp_mode = mode
+        
+        if mode == "send":
+            # Show send controls, hide listen controls
+            self.send_frame.pack(pady=5, before=self.tftp_text)
+            self.listen_frame.pack_forget()
+            
+            # Update IP label and make entry editable
+            self.ip_label.config(text="Target IP:")
+            self.ip_entry.config(state='normal', bg='#404040')
+            if self.ip_entry.get() == self.get_local_ip():
+                self.ip_entry.delete(0, tk.END)
+                self.ip_entry.insert(0, "10.10.2.46")
+        else:  # listen mode
+            # Show listen controls, hide send controls
+            self.send_frame.pack_forget()
+            self.listen_frame.pack(pady=5, before=self.tftp_text)
+            
+            # Update IP label and show local IP (read-only)
+            self.ip_label.config(text="Listen IP:")
+            local_ip = self.get_local_ip()
+            self.ip_entry.config(state='normal')
+            self.ip_entry.delete(0, tk.END)
+            self.ip_entry.insert(0, local_ip)
+            self.ip_entry.config(state='readonly', bg='#303030')
+    
+    def toggle_listen(self):
+        """Start or stop TFTP listening"""
+        if not self.tftp_listening:
+            ip = self.ip_entry.get()
+            filename = self.output_entry.get()
+            try:
+                self.tftp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                self.tftp_sock.bind((ip, 69))
+                self.tftp_listening = True
+                self.start_listen_btn.config(text="Stop Listen", bg='#ff0000')
+                self.tftp_listen_thread = threading.Thread(target=self.tftp_server, args=(filename,), daemon=True)
+                self.tftp_listen_thread.start()
+                self.tftp_msg_queue.put(f"Listening for TFTP on {ip}:69\n")
+                
+                # Disable mode switching while listening
+                self.send_radio.config(state='disabled')
+                self.listen_radio.config(state='disabled')
+            except Exception as e:
+                messagebox.showerror("Error", str(e))
+        else:
+            self.tftp_listening = False
+            if self.tftp_sock:
+                self.tftp_sock.close()
+                self.tftp_sock = None
+            self.start_listen_btn.config(text="Start Listen", bg='#1a1a1a')
+            self.tftp_msg_queue.put("Stopped listening\n")
+            
+            # Re-enable mode switching
+            self.send_radio.config(state='normal')
+            self.listen_radio.config(state='normal')
+    
+    def tftp_server(self, out_filename):
+        """TFTP server for receiving files"""
+        while self.tftp_listening:
+            try:
+                data, addr = self.tftp_sock.recvfrom(1024)
+                opcode = struct.unpack('!H', data[:2])[0]
+                if opcode == 2:  # WRQ
+                    # Parse filename and mode
+                    filename_end = data[2:].find(b'\0')
+                    filename_req = data[2:2 + filename_end].decode()
+                    mode_start = 2 + filename_end + 1
+                    mode_end_rel = data[mode_start:].find(b'\0')
+                    mode_end = mode_start + mode_end_rel
+                    mode = data[mode_start:mode_end].decode()
+                    
+                    self.tftp_msg_queue.put(f"WRQ from {addr}: {filename_req} ({mode})\n")
+                    
+                    # Parse options
+                    opt_data = data[mode_end + 1:]
+                    expected_size = None
+                    while len(opt_data) > 0:
+                        key_end = opt_data.find(b'\0')
+                        if key_end == -1:
+                            break
+                        key = opt_data[:key_end].decode()
+                        opt_data = opt_data[key_end + 1:]
+                        val_end = opt_data.find(b'\0')
+                        if val_end == -1:
+                            break
+                        val = opt_data[:val_end].decode()
+                        opt_data = opt_data[val_end + 1:]
+                        if key == 'size':
+                            expected_size = int(val)
+                    
+                    # Send OACK or ACK 0
+                    if expected_size is not None:
+                        oack = struct.pack('!H', 6) + b'size\0' + str(expected_size).encode() + b'\0'
+                        self.tftp_sock.sendto(oack, addr)
+                        self.tftp_msg_queue.put(f"Sent OACK with expected size {expected_size}\n")
+                    else:
+                        ack = struct.pack('!HH', 4, 0)
+                        self.tftp_sock.sendto(ack, addr)
+                    
+                    # Open file and receive
+                    total_received = 0
+                    expected_blocks = []
+                    received_blocks = []
+                    missing_blocks = []
+                    
+                    with open(out_filename, 'wb') as f:
+                        block_num = 1
+                        consecutive_missing = 0
+                        last_received_block = 0
+                        
+                        while self.tftp_listening:
+                            try:
+                                # Set a timeout for receiving packets
+                                self.tftp_sock.settimeout(5.0)
+                                data_pkt, addr_check = self.tftp_sock.recvfrom(1024)
+                                self.tftp_sock.settimeout(None)
+                            except socket.timeout:
+                                # Timeout waiting for packet - might be missing blocks
+                                if expected_size is not None and total_received < expected_size:
+                                    missing_bytes = expected_size - total_received
+                                    self.tftp_msg_queue.put(f"⚠️ TIMEOUT: Expected more data. Missing approximately {missing_bytes} bytes.\n")
+                                    self.tftp_msg_queue.put(f"⚠️ This file appears to be CORRUPTED - some packets were not received!\n")
+                                    self.tftp_msg_queue.put(f"⚠️ Please request the sender to send the file again.\n")
+                                break
+                                
+                            if addr_check != addr:
+                                continue
+                            pkt_opcode = struct.unpack('!H', data_pkt[:2])[0]
+                            if pkt_opcode != 3:  # DATA
+                                break
+                            block = struct.unpack('!H', data_pkt[2:4])[0]
+                            
+                            # Check for missing blocks
+                            if block != block_num:
+                                if block > block_num:
+                                    # We're missing some blocks
+                                    for missing in range(block_num, block):
+                                        missing_blocks.append(missing)
+                                        self.tftp_msg_queue.put(f"⚠️ MISSING BLOCK {missing}! Expected {block_num}, received {block}\n")
+                                    consecutive_missing = block - block_num
+                                    block_num = block
+                                else:
+                                    # Duplicate or out-of-order block
+                                    self.tftp_msg_queue.put(f"⚠️ Duplicate/out-of-order block {block}, expected {block_num}\n")
+                                    continue
+                            
+                            received_blocks.append(block)
+                            filedata = data_pkt[4:]
+                            f.write(filedata)
+                            total_received += len(filedata)
+                            last_received_block = block
+                            
+                            if missing_blocks:
+                                self.tftp_msg_queue.put(f"Received block {block_num} ({len(filedata)} bytes) - GAPS DETECTED\n")
+                            else:
+                                self.tftp_msg_queue.put(f"Received block {block_num}, {len(filedata)} bytes\n")
+                            
+                            # ACK
+                            ack_pkt = struct.pack('!HH', 4, block_num)
+                            self.tftp_sock.sendto(ack_pkt, addr)
+                            block_num += 1
+                            
+                            if len(filedata) < 512:
+                                break
+                    
+                    # Final corruption check
+                    if missing_blocks:
+                        self.tftp_msg_queue.put(f"\n🚨 FILE CORRUPTION DETECTED! 🚨\n")
+                        self.tftp_msg_queue.put(f"Missing blocks: {missing_blocks}\n")
+                        self.tftp_msg_queue.put(f"Missing approximately {len(missing_blocks) * 512} bytes of data.\n")
+                        self.tftp_msg_queue.put(f"⚠️ This file is CORRUPTED and should not be used!\n")
+                        self.tftp_msg_queue.put(f"⚠️ Please request the sender to resend the file.\n\n")
+                    
+                    # Check size if expected
+                    if expected_size is not None:
+                        if total_received != expected_size:
+                            missing_bytes = expected_size - total_received
+                            self.tftp_msg_queue.put(f"🚨 SIZE MISMATCH DETECTED! 🚨\n")
+                            self.tftp_msg_queue.put(f"Expected {expected_size} bytes, received {total_received} bytes\n")
+                            self.tftp_msg_queue.put(f"Missing {missing_bytes} bytes - FILE IS CORRUPTED!\n")
+                            self.tftp_msg_queue.put(f"⚠️ Please request the sender to send the file again.\n")
+                        else:
+                            if missing_blocks:
+                                self.tftp_msg_queue.put(f"File size matches expected ({total_received} bytes) but blocks are missing - FILE IS STILL CORRUPTED!\n")
+                            else:
+                                self.tftp_msg_queue.put(f"File received successfully: {out_filename} ({total_received} bytes, matches expected)\n")
+                    else:
+                        if missing_blocks:
+                            self.tftp_msg_queue.put(f"File received: {out_filename} ({total_received} bytes) - ⚠️ BUT CORRUPTED DUE TO MISSING BLOCKS!\n")
+                        else:
+                            self.tftp_msg_queue.put(f"File received: {out_filename} ({total_received} bytes)\n")
+            except Exception as e:
+                if self.tftp_listening:
+                    self.tftp_msg_queue.put(f"Error: {str(e)}\n")
+    
     def open_listen_popup(self):
-        TFTPListenPopup(self)
+        # This method is no longer used but kept for compatibility
+        pass
     
     def open_write_popup(self):
         UDPWritePopup(self)
@@ -726,6 +777,10 @@ class TFTPUDPApp:
             self.udp_running = False
             if self.udp_sock:
                 self.udp_sock.close()
+        if self.tftp_listening:
+            self.tftp_listening = False
+            if self.tftp_sock:
+                self.tftp_sock.close()
         if self.sending:
             self.abort_flag = True
             if self.tftp_sock:
