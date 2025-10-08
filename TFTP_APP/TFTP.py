@@ -138,9 +138,12 @@ class TFTPUDPApp:
         self.file_entry.pack(side=tk.LEFT, padx=5)
         tk.Button(file_frame, text="Browse", command=self.browse_file, bg='#404040', fg='black', relief='flat').pack(side=tk.LEFT, padx=5)
         
+        # Send header
+        tk.Label(self.send_frame, text="Send", fg='white', bg='#2c2c2c', font=('Arial', 10, 'bold')).pack(pady=(10, 2))
+        
         btn_frame = tk.Frame(self.send_frame, bg='#2c2c2c')
-        btn_frame.pack(pady=10)
-        self.normal_send_btn = tk.Button(btn_frame, text="TFTP Send", command=self.normal_send_tftp, bg='#1a1a1a', fg='white', relief='flat')
+        btn_frame.pack(pady=5)
+        self.normal_send_btn = tk.Button(btn_frame, text="TFTP Send", command=self.normal_send_tftp, bg='#00aa00', fg='white', relief='flat')
         self.normal_send_btn.pack(side=tk.LEFT, padx=5)
         
         # Failure simulation buttons - First row
@@ -148,34 +151,34 @@ class TFTPUDPApp:
         
         btn_frame2 = tk.Frame(self.send_frame, bg='#2c2c2c')
         btn_frame2.pack(pady=2)
-        self.fail_outoforder_btn = tk.Button(btn_frame2, text="Out-of-Order", command=self.failure_out_of_order, bg='#ff00ff', fg='white', relief='flat', width=12)
+        self.fail_outoforder_btn = tk.Button(btn_frame2, text="Out-of-Order", command=self.failure_out_of_order, bg='#ff0000', fg='white', relief='flat', width=12)
         self.fail_outoforder_btn.pack(side=tk.LEFT, padx=3)
         self.create_tooltip(self.fail_outoforder_btn, "Sends blocks 1,2,4,3,5,6... to test handling of misordered packets")
         
-        self.fail_duplicate_btn = tk.Button(btn_frame2, text="Duplicates", command=self.failure_duplicate, bg='#ff00ff', fg='white', relief='flat', width=12)
+        self.fail_duplicate_btn = tk.Button(btn_frame2, text="Duplicates", command=self.failure_duplicate, bg='#ff0000', fg='white', relief='flat', width=12)
         self.fail_duplicate_btn.pack(side=tk.LEFT, padx=3)
         self.create_tooltip(self.fail_duplicate_btn, "Sends some blocks twice to test duplicate detection")
         
-        self.fail_wrongnum_btn = tk.Button(btn_frame2, text="Wrong Block #", command=self.failure_wrong_numbers, bg='#ff00ff', fg='white', relief='flat', width=12)
+        self.fail_wrongnum_btn = tk.Button(btn_frame2, text="Wrong Block #", command=self.failure_wrong_numbers, bg='#ff0000', fg='white', relief='flat', width=12)
         self.fail_wrongnum_btn.pack(side=tk.LEFT, padx=3)
         self.create_tooltip(self.fail_wrongnum_btn, "Uses incorrect block numbering to test validation")
         
         # Failure simulation buttons - Second row
         btn_frame3 = tk.Frame(self.send_frame, bg='#2c2c2c')
         btn_frame3.pack(pady=2)
-        self.fail_truncated_btn = tk.Button(btn_frame3, text="Truncated", command=self.failure_truncated, bg='#ff00ff', fg='white', relief='flat', width=12)
+        self.fail_truncated_btn = tk.Button(btn_frame3, text="Truncated", command=self.failure_truncated, bg='#ff0000', fg='white', relief='flat', width=12)
         self.fail_truncated_btn.pack(side=tk.LEFT, padx=3)
         self.create_tooltip(self.fail_truncated_btn, "Stops after sending 60% of file to test incomplete transfers")
         
-        self.fail_timeout_btn = tk.Button(btn_frame3, text="Timeout", command=self.failure_timeout, bg='#ff00ff', fg='white', relief='flat', width=12)
+        self.fail_timeout_btn = tk.Button(btn_frame3, text="Timeout", command=self.failure_timeout, bg='#ff0000', fg='white', relief='flat', width=12)
         self.fail_timeout_btn.pack(side=tk.LEFT, padx=3)
         self.create_tooltip(self.fail_timeout_btn, "Pauses 10 seconds mid-transfer to test timeout handling")
         
-        self.fail_pktloss_btn = tk.Button(btn_frame3, text="Packet Loss", command=self.failure_packet_loss, bg='#ff00ff', fg='white', relief='flat', width=12)
+        self.fail_pktloss_btn = tk.Button(btn_frame3, text="Packet Loss", command=self.failure_packet_loss, bg='#ff0000', fg='white', relief='flat', width=12)
         self.fail_pktloss_btn.pack(side=tk.LEFT, padx=3)
         self.create_tooltip(self.fail_pktloss_btn, "Randomly drops ~30% of packets to test loss detection")
         
-        self.swap_send_btn = tk.Button(btn_frame3, text="Data Swap", command=self.swap_send_tftp, bg='#ff00ff', fg='white', relief='flat', width=12)
+        self.swap_send_btn = tk.Button(btn_frame3, text="Data Swap", command=self.swap_send_tftp, bg='#ff0000', fg='white', relief='flat', width=12)
         self.swap_send_btn.pack(side=tk.LEFT, padx=3)
         self.create_tooltip(self.swap_send_btn, "Swaps two random bytes in file data to test data corruption detection")
         
