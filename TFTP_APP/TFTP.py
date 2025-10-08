@@ -117,38 +117,96 @@ class TFTPListenPopup:
                     
                     # Open file and receive
                     total_received = 0
+                    expected_blocks = []
+                    received_blocks = []
+                    missing_blocks = []
+                    
                     with open(out_filename, 'wb') as f:
                         block_num = 1
+                        consecutive_missing = 0
+                        last_received_block = 0
+                        
                         while self.tftp_running:
-                            data_pkt, addr_check = self.tftp_sock.recvfrom(1024)
+                            try:
+                                # Set a timeout for receiving packets
+                                self.tftp_sock.settimeout(5.0)
+                                data_pkt, addr_check = self.tftp_sock.recvfrom(1024)
+                                self.tftp_sock.settimeout(None)
+                            except socket.timeout:
+                                # Timeout waiting for packet - might be missing blocks
+                                if expected_size is not None and total_received < expected_size:
+                                    missing_bytes = expected_size - total_received
+                                    self.msg_queue.put(f"⚠️ TIMEOUT: Expected more data. Missing approximately {missing_bytes} bytes.\n")
+                                    self.msg_queue.put(f"⚠️ This file appears to be CORRUPTED - some packets were not received!\n")
+                                    self.msg_queue.put(f"⚠️ Please request the sender to send the file again.\n")
+                                break
+                                
                             if addr_check != addr:
                                 continue
                             pkt_opcode = struct.unpack('!H', data_pkt[:2])[0]
                             if pkt_opcode != 3:  # DATA
                                 break
                             block = struct.unpack('!H', data_pkt[2:4])[0]
+                            
+                            # Check for missing blocks
                             if block != block_num:
-                                break
+                                if block > block_num:
+                                    # We're missing some blocks
+                                    for missing in range(block_num, block):
+                                        missing_blocks.append(missing)
+                                        self.msg_queue.put(f"⚠️ MISSING BLOCK {missing}! Expected {block_num}, received {block}\n")
+                                    consecutive_missing = block - block_num
+                                    block_num = block
+                                else:
+                                    # Duplicate or out-of-order block
+                                    self.msg_queue.put(f"⚠️ Duplicate/out-of-order block {block}, expected {block_num}\n")
+                                    continue
+                            
+                            received_blocks.append(block)
                             filedata = data_pkt[4:]
                             f.write(filedata)
                             total_received += len(filedata)
-                            self.msg_queue.put(f"Received block {block_num}, {len(filedata)} bytes\n")
+                            last_received_block = block
+                            
+                            if missing_blocks:
+                                self.msg_queue.put(f"Received block {block_num} ({len(filedata)} bytes) - GAPS DETECTED\n")
+                            else:
+                                self.msg_queue.put(f"Received block {block_num}, {len(filedata)} bytes\n")
                             
                             # ACK
                             ack_pkt = struct.pack('!HH', 4, block_num)
                             self.tftp_sock.sendto(ack_pkt, addr)
                             block_num += 1
+                            
                             if len(filedata) < 512:
                                 break
+                    
+                    # Final corruption check
+                    if missing_blocks:
+                        self.msg_queue.put(f"\n🚨 FILE CORRUPTION DETECTED! 🚨\n")
+                        self.msg_queue.put(f"Missing blocks: {missing_blocks}\n")
+                        self.msg_queue.put(f"Missing approximately {len(missing_blocks) * 512} bytes of data.\n")
+                        self.msg_queue.put(f"⚠️ This file is CORRUPTED and should not be used!\n")
+                        self.msg_queue.put(f"⚠️ Please request the sender to resend the file.\n\n")
                     
                     # Check size if expected
                     if expected_size is not None:
                         if total_received != expected_size:
-                            self.msg_queue.put(f"Hey we just got the packet and its not the same number of bytes it said it was ({expected_size}), received {total_received}, its corrupted send again.\n")
+                            missing_bytes = expected_size - total_received
+                            self.msg_queue.put(f"🚨 SIZE MISMATCH DETECTED! 🚨\n")
+                            self.msg_queue.put(f"Expected {expected_size} bytes, received {total_received} bytes\n")
+                            self.msg_queue.put(f"Missing {missing_bytes} bytes - FILE IS CORRUPTED!\n")
+                            self.msg_queue.put(f"⚠️ Please request the sender to send the file again.\n")
                         else:
-                            self.msg_queue.put(f"File received: {out_filename} ({total_received} bytes, matches expected)\n")
+                            if missing_blocks:
+                                self.msg_queue.put(f"File size matches expected ({total_received} bytes) but blocks are missing - FILE IS STILL CORRUPTED!\n")
+                            else:
+                                self.msg_queue.put(f"File received successfully: {out_filename} ({total_received} bytes, matches expected)\n")
                     else:
-                        self.msg_queue.put(f"File received: {out_filename} ({total_received} bytes)\n")
+                        if missing_blocks:
+                            self.msg_queue.put(f"File received: {out_filename} ({total_received} bytes) - ⚠️ BUT CORRUPTED DUE TO MISSING BLOCKS!\n")
+                        else:
+                            self.msg_queue.put(f"File received: {out_filename} ({total_received} bytes)\n")
             except Exception as e:
                 if self.tftp_running:
                     self.msg_queue.put(f"Error: {str(e)}\n")
@@ -202,6 +260,8 @@ class TFTPUDPApp:
         self.abort_flag = False
         self.tftp_sock = None
         self.tftp_msg_queue = queue.Queue()
+        self.corrupt_mode = False
+        self.blocks_to_skip = set()
         
         # Top half: TFTP Sender
         self.tftp_frame = tk.Frame(root, height=300, bg='#2c2c2c')
@@ -444,6 +504,123 @@ class TFTPUDPApp:
             self.tftp_sock = None
             self.root.after(0, self.stop_sending)
     
+    def _send_tftp_worker_corrupt(self, ip, filename_req, file_data, total_bytes):
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setblocking(False)
+            self.tftp_sock = sock
+            
+            # WRQ packet with options
+            opcode = 2
+            mode = b'octet'
+            wrq = struct.pack('!H', opcode) + filename_req.encode() + b'\0' + mode + b'\0size\0' + str(total_bytes).encode() + b'\0'
+            sock.sendto(wrq, (ip, 69))
+            self.tftp_msg_queue.put(f"Sent WRQ with size {total_bytes}\n")
+            
+            # Receive OACK or ACK 0
+            received_resp = False
+            while not self.abort_flag and not received_resp:
+                try:
+                    data, addr = sock.recvfrom(1024)
+                    received_resp = True
+                except BlockingIOError:
+                    time.sleep(0.01)
+                    continue
+                except OSError:
+                    if self.abort_flag:
+                        raise Exception("Aborted during WRQ response")
+                    raise
+            if not received_resp:
+                raise Exception("Aborted during WRQ response")
+            
+            resp_opcode = struct.unpack('!H', data[:2])[0]
+            if resp_opcode not in (4, 6):
+                raise Exception("Unexpected response to WRQ")
+            if resp_opcode == 6:
+                # Parse OACK options (optional, for confirmation)
+                opt_data = data[2:]
+                confirmed_size = None
+                while len(opt_data) > 0:
+                    key_end = opt_data.find(b'\0')
+                    if key_end == -1:
+                        break
+                    key = opt_data[:key_end].decode()
+                    opt_data = opt_data[key_end + 1:]
+                    val_end = opt_data.find(b'\0')
+                    if val_end == -1:
+                        break
+                    val = opt_data[:val_end].decode()
+                    opt_data = opt_data[val_end + 1:]
+                    if key == 'size':
+                        confirmed_size = int(val)
+                self.tftp_msg_queue.put(f"Received OACK with confirmed size {confirmed_size}\n")
+            
+            # Send file in blocks (skipping some for corruption)
+            pos = 0
+            block_num = 1
+            actual_bytes_sent = 0
+            while pos < len(file_data) and not self.abort_flag:
+                block_end = min(pos + 512, len(file_data))
+                block = file_data[pos:block_end]
+                
+                # Skip this block if it's in our corruption list
+                if block_num in self.blocks_to_skip:
+                    self.tftp_msg_queue.put(f"SKIPPING block {block_num} (corruption mode)\n")
+                    pos += 512
+                    block_num += 1
+                    continue
+                
+                data_pkt = struct.pack('!HH', 3, block_num) + block
+                sock.sendto(data_pkt, addr)
+                actual_bytes_sent += len(block)
+                
+                hex_data = binascii.hexlify(block).decode()
+                if len(hex_data) > 200:
+                    hex_data = hex_data[:200] + '...'
+                self.tftp_msg_queue.put(f"Sent block {block_num} ({len(block)} bytes): {hex_data}\n")
+                
+                # Wait for ACK
+                received_ack = False
+                ack = None
+                while not self.abort_flag and not received_ack:
+                    try:
+                        ack, _ = sock.recvfrom(1024)
+                        received_ack = True
+                    except BlockingIOError:
+                        time.sleep(0.01)
+                        continue
+                    except OSError:
+                        if self.abort_flag:
+                            break
+                        raise
+                
+                if not received_ack:
+                    break
+                
+                if struct.unpack('!HH', ack[:4])[0] != 4 or struct.unpack('!H', ack[2:4])[0] != block_num:
+                    raise Exception("ACK mismatch")
+                
+                pos += 512
+                block_num += 1
+            
+            if self.abort_flag:
+                self.tftp_msg_queue.put(f"Upload aborted: {actual_bytes_sent} bytes sent\n")
+            else:
+                missing_bytes = total_bytes - actual_bytes_sent
+                self.tftp_msg_queue.put(f"Corrupt upload complete: {actual_bytes_sent} bytes sent (missing {missing_bytes} bytes)\n")
+        except Exception as e:
+            if self.abort_flag:
+                self.tftp_msg_queue.put(f"Upload aborted\n")
+            else:
+                self.tftp_msg_queue.put(f"Error: {str(e)}\n")
+        finally:
+            if sock:
+                sock.close()
+            self.tftp_sock = None
+            self.corrupt_mode = False
+            self.root.after(0, self.stop_sending)
+    
     def normal_send_tftp(self):
         if self.sending:
             return
@@ -474,15 +651,19 @@ class TFTPUDPApp:
         with open(filename, 'rb') as f:
             file_data = bytearray(f.read())
         original_total = len(file_data)
-        if original_total > 512:
-            block_to_delete = random.randint(1, (original_total // 512) - 1)
-            start_pos = (block_to_delete - 1) * 512
-            end_pos = start_pos + 512
-            del file_data[start_pos:end_pos]
-            self.tftp_msg_queue.put(f"Deleted whole block {block_to_delete} (positions {start_pos} to {end_pos-1})\n")
-        total_bytes = original_total
+        
+        # Create corruption by skipping some blocks during transmission
+        self.corrupt_mode = True
+        self.blocks_to_skip = set()
+        if original_total > 1536:  # At least 3 blocks
+            num_blocks = (original_total + 511) // 512
+            num_to_skip = min(3, num_blocks // 4)  # Skip up to 3 blocks or 25% of blocks
+            self.blocks_to_skip = set(random.sample(range(2, num_blocks), num_to_skip))
+            self.tftp_msg_queue.put(f"Will intentionally skip blocks: {sorted(self.blocks_to_skip)}\n")
+        
+        total_bytes = original_total  # Report original size but skip blocks
         filename_req = os.path.basename(filename)
-        self.tftp_thread = threading.Thread(target=self._send_tftp_worker, args=(ip, filename_req, file_data, total_bytes), daemon=True)
+        self.tftp_thread = threading.Thread(target=self._send_tftp_worker_corrupt, args=(ip, filename_req, file_data, total_bytes), daemon=True)
         self.tftp_thread.start()
     
     def swap_send_tftp(self):
