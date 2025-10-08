@@ -119,9 +119,15 @@ class TFTPUDPApp:
         ip_frame.pack(pady=5)
         self.ip_label = tk.Label(ip_frame, text="Target IP:", fg='white', bg='#2c2c2c')
         self.ip_label.pack(side=tk.LEFT)
+        
+        # IP Entry (for Send mode)
         self.ip_entry = tk.Entry(ip_frame, width=20, bg='#404040', fg='white', insertbackground='white', font=('Arial', 12))
         self.ip_entry.pack(side=tk.LEFT, padx=5)
         self.ip_entry.insert(0, "10.10.2.46")
+        
+        # IP Display Label (for Listen mode - initially hidden)
+        self.ip_display = tk.Label(ip_frame, text="", fg='white', bg='#2c2c2c', font=('Arial', 12), width=20, anchor='w')
+        # Don't pack it yet - will be shown in listen mode
         
         # Send mode controls
         self.send_frame = tk.Frame(self.tftp_frame, bg='#2c2c2c')
@@ -280,9 +286,10 @@ class TFTPUDPApp:
             self.send_frame.pack(pady=5, before=self.tftp_text)
             self.listen_frame.pack_forget()
             
-            # Update IP label and make entry editable
+            # Update IP label and show entry field, hide display label
             self.ip_label.config(text="Target IP:")
-            self.ip_entry.config(state='normal', bg='#404040')
+            self.ip_display.pack_forget()
+            self.ip_entry.pack(side=tk.LEFT, padx=5)
             if self.ip_entry.get() == self.get_local_ip():
                 self.ip_entry.delete(0, tk.END)
                 self.ip_entry.insert(0, "10.10.2.46")
@@ -291,13 +298,12 @@ class TFTPUDPApp:
             self.send_frame.pack_forget()
             self.listen_frame.pack(pady=5, before=self.tftp_text)
             
-            # Update IP label and show local IP (read-only)
+            # Update IP label and show display label, hide entry field
             self.ip_label.config(text="Listen IP:")
             local_ip = self.get_local_ip()
-            self.ip_entry.config(state='normal')
-            self.ip_entry.delete(0, tk.END)
-            self.ip_entry.insert(0, local_ip)
-            self.ip_entry.config(state='readonly', bg='#303030')
+            self.ip_entry.pack_forget()
+            self.ip_display.config(text=local_ip)
+            self.ip_display.pack(side=tk.LEFT, padx=5)
     
     def toggle_listen(self):
         """Start or stop TFTP listening"""
