@@ -10,6 +10,34 @@ import binascii
 import random
 import time
 
+class ToolTip:
+    """Create a tooltip for a given widget"""
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.tooltip = None
+        self.widget.bind("<Enter>", self.on_enter)
+        self.widget.bind("<Leave>", self.on_leave)
+    
+    def on_enter(self, event=None):
+        x, y, _, _ = self.widget.bbox("insert")
+        x += self.widget.winfo_rootx() + 25
+        y += self.widget.winfo_rooty() + 25
+        
+        self.tooltip = tk.Toplevel(self.widget)
+        self.tooltip.wm_overrideredirect(True)
+        self.tooltip.wm_geometry(f"+{x}+{y}")
+        
+        label = tk.Label(self.tooltip, text=self.text, background="#ffffe0", 
+                        relief='solid', borderwidth=1, font=("Arial", 9), 
+                        wraplength=300, justify='left', padx=5, pady=3)
+        label.pack()
+    
+    def on_leave(self, event=None):
+        if self.tooltip:
+            self.tooltip.destroy()
+            self.tooltip = None
+
 class UDPWritePopup:
     def __init__(self, parent):
         self.parent = parent
@@ -115,6 +143,38 @@ class TFTPUDPApp:
         self.swap_send_btn = tk.Button(btn_frame, text="TFTP Swap Send", command=self.swap_send_tftp, bg='#00ff00', fg='black', relief='flat')
         self.swap_send_btn.pack(side=tk.LEFT, padx=5)
         
+        # Failure simulation buttons - First row
+        tk.Label(self.send_frame, text="Failure Simulations:", fg='#888888', bg='#2c2c2c', font=('Arial', 9)).pack(pady=(5, 2))
+        
+        btn_frame2 = tk.Frame(self.send_frame, bg='#2c2c2c')
+        btn_frame2.pack(pady=2)
+        self.fail_outoforder_btn = tk.Button(btn_frame2, text="Out-of-Order", command=self.failure_out_of_order, bg='#ff00ff', fg='white', relief='flat', width=12)
+        self.fail_outoforder_btn.pack(side=tk.LEFT, padx=3)
+        self.create_tooltip(self.fail_outoforder_btn, "Sends blocks 1,2,4,3,5,6... to test handling of misordered packets")
+        
+        self.fail_duplicate_btn = tk.Button(btn_frame2, text="Duplicates", command=self.failure_duplicate, bg='#ff00ff', fg='white', relief='flat', width=12)
+        self.fail_duplicate_btn.pack(side=tk.LEFT, padx=3)
+        self.create_tooltip(self.fail_duplicate_btn, "Sends some blocks twice to test duplicate detection")
+        
+        self.fail_wrongnum_btn = tk.Button(btn_frame2, text="Wrong Block #", command=self.failure_wrong_numbers, bg='#ff00ff', fg='white', relief='flat', width=12)
+        self.fail_wrongnum_btn.pack(side=tk.LEFT, padx=3)
+        self.create_tooltip(self.fail_wrongnum_btn, "Uses incorrect block numbering to test validation")
+        
+        # Failure simulation buttons - Second row
+        btn_frame3 = tk.Frame(self.send_frame, bg='#2c2c2c')
+        btn_frame3.pack(pady=2)
+        self.fail_truncated_btn = tk.Button(btn_frame3, text="Truncated", command=self.failure_truncated, bg='#ff00ff', fg='white', relief='flat', width=12)
+        self.fail_truncated_btn.pack(side=tk.LEFT, padx=3)
+        self.create_tooltip(self.fail_truncated_btn, "Stops after sending 60% of file to test incomplete transfers")
+        
+        self.fail_timeout_btn = tk.Button(btn_frame3, text="Timeout", command=self.failure_timeout, bg='#ff00ff', fg='white', relief='flat', width=12)
+        self.fail_timeout_btn.pack(side=tk.LEFT, padx=3)
+        self.create_tooltip(self.fail_timeout_btn, "Pauses 10 seconds mid-transfer to test timeout handling")
+        
+        self.fail_pktloss_btn = tk.Button(btn_frame3, text="Packet Loss", command=self.failure_packet_loss, bg='#ff00ff', fg='white', relief='flat', width=12)
+        self.fail_pktloss_btn.pack(side=tk.LEFT, padx=3)
+        self.create_tooltip(self.fail_pktloss_btn, "Randomly drops ~30% of packets to test loss detection")
+        
         # Listen mode controls
         self.listen_frame = tk.Frame(self.tftp_frame, bg='#2c2c2c')
         
@@ -175,6 +235,10 @@ class TFTPUDPApp:
         self.udp_running = False
         self.msg_queue = queue.Queue()
         self.poll_queue()
+    
+    def create_tooltip(self, widget, text):
+        """Create a tooltip for a widget"""
+        ToolTip(widget, text)
     
     def poll_tftp_queue(self):
         try:
@@ -436,6 +500,12 @@ class TFTPUDPApp:
         self.normal_send_btn.config(state='disabled')
         self.corrupt_send_btn.config(state='disabled')
         self.swap_send_btn.config(state='disabled')
+        self.fail_outoforder_btn.config(state='disabled')
+        self.fail_duplicate_btn.config(state='disabled')
+        self.fail_wrongnum_btn.config(state='disabled')
+        self.fail_truncated_btn.config(state='disabled')
+        self.fail_timeout_btn.config(state='disabled')
+        self.fail_pktloss_btn.config(state='disabled')
         self.abort_frame.pack(pady=5, before=self.tftp_text)
         self.progress.pack(pady=5, before=self.tftp_text)
         self.progress.start()
@@ -450,6 +520,12 @@ class TFTPUDPApp:
         self.normal_send_btn.config(state='normal')
         self.corrupt_send_btn.config(state='normal')
         self.swap_send_btn.config(state='normal')
+        self.fail_outoforder_btn.config(state='normal')
+        self.fail_duplicate_btn.config(state='normal')
+        self.fail_wrongnum_btn.config(state='normal')
+        self.fail_truncated_btn.config(state='normal')
+        self.fail_timeout_btn.config(state='normal')
+        self.fail_pktloss_btn.config(state='normal')
         self.abort_frame.pack_forget()
         self.progress.stop()
         self.progress.pack_forget()
@@ -688,6 +764,362 @@ class TFTPUDPApp:
             # Signal the main thread to stop sending UI
             self._stop_sending_flag = True
     
+    def _send_tftp_worker_out_of_order(self, ip, filename_req, file_data, total_bytes):
+        """Send blocks out of order (every 4th and 5th block swapped)"""
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setblocking(False)
+            self.tftp_sock = sock
+            
+            wrq = struct.pack('!H', 2) + filename_req.encode() + b'\0' + b'octet' + b'\0size\0' + str(total_bytes).encode() + b'\0'
+            sock.sendto(wrq, (ip, 69))
+            self.tftp_msg_queue.put(f"Sent WRQ with size {total_bytes}\n")
+            
+            # Wait for OACK/ACK
+            received_resp = False
+            while not self.abort_flag and not received_resp:
+                try:
+                    data, addr = sock.recvfrom(1024)
+                    received_resp = True
+                except BlockingIOError:
+                    time.sleep(0.01)
+                    continue
+            
+            # Prepare all blocks
+            blocks = []
+            pos = 0
+            block_num = 1
+            while pos < len(file_data):
+                block_end = min(pos + 512, len(file_data))
+                blocks.append((block_num, file_data[pos:block_end]))
+                pos += 512
+                block_num += 1
+            
+            # Send blocks with some out of order
+            idx = 0
+            while idx < len(blocks) and not self.abort_flag:
+                # Every 3rd and 4th block swap order
+                if idx < len(blocks) - 1 and (idx + 1) % 4 == 3:
+                    # Send block idx+1 first, then idx
+                    for b_idx in [idx + 1, idx]:
+                        block_num, block = blocks[b_idx]
+                        data_pkt = struct.pack('!HH', 3, block_num) + block
+                        sock.sendto(data_pkt, addr)
+                        self.tftp_msg_queue.put(f"Sent block {block_num} OUT OF ORDER ({len(block)} bytes)\n")
+                        # Wait for ACK
+                        ack = None
+                        while not self.abort_flag:
+                            try:
+                                ack, _ = sock.recvfrom(1024)
+                                break
+                            except BlockingIOError:
+                                time.sleep(0.01)
+                    idx += 2
+                else:
+                    block_num, block = blocks[idx]
+                    data_pkt = struct.pack('!HH', 3, block_num) + block
+                    sock.sendto(data_pkt, addr)
+                    self.tftp_msg_queue.put(f"Sent block {block_num} ({len(block)} bytes)\n")
+                    # Wait for ACK
+                    while not self.abort_flag:
+                        try:
+                            ack, _ = sock.recvfrom(1024)
+                            break
+                        except BlockingIOError:
+                            time.sleep(0.01)
+                    idx += 1
+            
+            self.tftp_msg_queue.put(f"Out-of-order upload complete\n")
+        except Exception as e:
+            self.tftp_msg_queue.put(f"Error: {str(e)}\n")
+        finally:
+            if sock:
+                sock.close()
+            self.tftp_sock = None
+            self._stop_sending_flag = True
+    
+    def _send_tftp_worker_duplicate(self, ip, filename_req, file_data, total_bytes):
+        """Send some blocks twice"""
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setblocking(False)
+            self.tftp_sock = sock
+            
+            wrq = struct.pack('!H', 2) + filename_req.encode() + b'\0' + b'octet' + b'\0size\0' + str(total_bytes).encode() + b'\0'
+            sock.sendto(wrq, (ip, 69))
+            
+            # Wait for OACK/ACK
+            received_resp = False
+            while not self.abort_flag and not received_resp:
+                try:
+                    data, addr = sock.recvfrom(1024)
+                    received_resp = True
+                except BlockingIOError:
+                    time.sleep(0.01)
+                    continue
+            
+            pos = 0
+            block_num = 1
+            while pos < len(file_data) and not self.abort_flag:
+                block_end = min(pos + 512, len(file_data))
+                block = file_data[pos:block_end]
+                data_pkt = struct.pack('!HH', 3, block_num) + block
+                sock.sendto(data_pkt, addr)
+                self.tftp_msg_queue.put(f"Sent block {block_num} ({len(block)} bytes)\n")
+                
+                # Send duplicate for every 5th block
+                if block_num % 5 == 0:
+                    time.sleep(0.05)
+                    sock.sendto(data_pkt, addr)
+                    self.tftp_msg_queue.put(f"Sent DUPLICATE block {block_num}\n")
+                
+                # Wait for ACK
+                while not self.abort_flag:
+                    try:
+                        ack, _ = sock.recvfrom(1024)
+                        break
+                    except BlockingIOError:
+                        time.sleep(0.01)
+                
+                pos += 512
+                block_num += 1
+            
+            self.tftp_msg_queue.put(f"Duplicate blocks upload complete\n")
+        except Exception as e:
+            self.tftp_msg_queue.put(f"Error: {str(e)}\n")
+        finally:
+            if sock:
+                sock.close()
+            self.tftp_sock = None
+            self._stop_sending_flag = True
+    
+    def _send_tftp_worker_wrong_numbers(self, ip, filename_req, file_data, total_bytes):
+        """Send blocks with wrong block numbers"""
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setblocking(False)
+            self.tftp_sock = sock
+            
+            wrq = struct.pack('!H', 2) + filename_req.encode() + b'\0' + b'octet' + b'\0size\0' + str(total_bytes).encode() + b'\0'
+            sock.sendto(wrq, (ip, 69))
+            
+            # Wait for OACK/ACK
+            received_resp = False
+            while not self.abort_flag and not received_resp:
+                try:
+                    data, addr = sock.recvfrom(1024)
+                    received_resp = True
+                except BlockingIOError:
+                    time.sleep(0.01)
+                    continue
+            
+            pos = 0
+            block_num = 1
+            while pos < len(file_data) and not self.abort_flag:
+                block_end = min(pos + 512, len(file_data))
+                block = file_data[pos:block_end]
+                
+                # Use wrong block number for every 7th block
+                wrong_num = block_num + 10 if block_num % 7 == 0 else block_num
+                data_pkt = struct.pack('!HH', 3, wrong_num) + block
+                sock.sendto(data_pkt, addr)
+                
+                if wrong_num != block_num:
+                    self.tftp_msg_queue.put(f"Sent block with WRONG NUMBER {wrong_num} (should be {block_num})\n")
+                else:
+                    self.tftp_msg_queue.put(f"Sent block {block_num} ({len(block)} bytes)\n")
+                
+                # Wait for ACK (may fail due to wrong block number)
+                try:
+                    sock.settimeout(1.0)
+                    ack, _ = sock.recvfrom(1024)
+                    sock.settimeout(None)
+                except:
+                    sock.settimeout(None)
+                    self.tftp_msg_queue.put(f"No ACK received for block {block_num}\n")
+                
+                pos += 512
+                block_num += 1
+            
+            self.tftp_msg_queue.put(f"Wrong block numbers upload complete\n")
+        except Exception as e:
+            self.tftp_msg_queue.put(f"Error: {str(e)}\n")
+        finally:
+            if sock:
+                sock.close()
+            self.tftp_sock = None
+            self._stop_sending_flag = True
+    
+    def _send_tftp_worker_truncated(self, ip, filename_req, file_data, total_bytes):
+        """Stop transfer after 60% of file"""
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setblocking(False)
+            self.tftp_sock = sock
+            
+            wrq = struct.pack('!H', 2) + filename_req.encode() + b'\0' + b'octet' + b'\0size\0' + str(total_bytes).encode() + b'\0'
+            sock.sendto(wrq, (ip, 69))
+            self.tftp_msg_queue.put(f"Sent WRQ with size {total_bytes} (will truncate at 60%)\n")
+            
+            # Wait for OACK/ACK
+            received_resp = False
+            while not self.abort_flag and not received_resp:
+                try:
+                    data, addr = sock.recvfrom(1024)
+                    received_resp = True
+                except BlockingIOError:
+                    time.sleep(0.01)
+                    continue
+            
+            truncate_at = int(len(file_data) * 0.6)
+            pos = 0
+            block_num = 1
+            while pos < truncate_at and not self.abort_flag:
+                block_end = min(pos + 512, len(file_data))
+                block = file_data[pos:block_end]
+                data_pkt = struct.pack('!HH', 3, block_num) + block
+                sock.sendto(data_pkt, addr)
+                self.tftp_msg_queue.put(f"Sent block {block_num} ({len(block)} bytes)\n")
+                
+                # Wait for ACK
+                while not self.abort_flag:
+                    try:
+                        ack, _ = sock.recvfrom(1024)
+                        break
+                    except BlockingIOError:
+                        time.sleep(0.01)
+                
+                pos += 512
+                block_num += 1
+            
+            self.tftp_msg_queue.put(f"Transfer TRUNCATED at {pos} bytes (60% of {total_bytes})\n")
+        except Exception as e:
+            self.tftp_msg_queue.put(f"Error: {str(e)}\n")
+        finally:
+            if sock:
+                sock.close()
+            self.tftp_sock = None
+            self._stop_sending_flag = True
+    
+    def _send_tftp_worker_timeout(self, ip, filename_req, file_data, total_bytes):
+        """Pause for 10 seconds mid-transfer"""
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setblocking(False)
+            self.tftp_sock = sock
+            
+            wrq = struct.pack('!H', 2) + filename_req.encode() + b'\0' + b'octet' + b'\0size\0' + str(total_bytes).encode() + b'\0'
+            sock.sendto(wrq, (ip, 69))
+            
+            # Wait for OACK/ACK
+            received_resp = False
+            while not self.abort_flag and not received_resp:
+                try:
+                    data, addr = sock.recvfrom(1024)
+                    received_resp = True
+                except BlockingIOError:
+                    time.sleep(0.01)
+                    continue
+            
+            pause_at_block = 5
+            pos = 0
+            block_num = 1
+            while pos < len(file_data) and not self.abort_flag:
+                # Pause at block 5
+                if block_num == pause_at_block:
+                    self.tftp_msg_queue.put(f"⏸️ PAUSING for 10 seconds to simulate timeout...\n")
+                    time.sleep(10)
+                    self.tftp_msg_queue.put(f"▶️ Resuming transfer...\n")
+                
+                block_end = min(pos + 512, len(file_data))
+                block = file_data[pos:block_end]
+                data_pkt = struct.pack('!HH', 3, block_num) + block
+                sock.sendto(data_pkt, addr)
+                self.tftp_msg_queue.put(f"Sent block {block_num} ({len(block)} bytes)\n")
+                
+                # Wait for ACK
+                while not self.abort_flag:
+                    try:
+                        ack, _ = sock.recvfrom(1024)
+                        break
+                    except BlockingIOError:
+                        time.sleep(0.01)
+                
+                pos += 512
+                block_num += 1
+            
+            self.tftp_msg_queue.put(f"Timeout simulation upload complete\n")
+        except Exception as e:
+            self.tftp_msg_queue.put(f"Error: {str(e)}\n")
+        finally:
+            if sock:
+                sock.close()
+            self.tftp_sock = None
+            self._stop_sending_flag = True
+    
+    def _send_tftp_worker_packet_loss(self, ip, filename_req, file_data, total_bytes):
+        """Randomly drop 30% of packets"""
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setblocking(False)
+            self.tftp_sock = sock
+            
+            wrq = struct.pack('!H', 2) + filename_req.encode() + b'\0' + b'octet' + b'\0size\0' + str(total_bytes).encode() + b'\0'
+            sock.sendto(wrq, (ip, 69))
+            self.tftp_msg_queue.put(f"Sent WRQ - will drop ~30% of packets randomly\n")
+            
+            # Wait for OACK/ACK
+            received_resp = False
+            while not self.abort_flag and not received_resp:
+                try:
+                    data, addr = sock.recvfrom(1024)
+                    received_resp = True
+                except BlockingIOError:
+                    time.sleep(0.01)
+                    continue
+            
+            pos = 0
+            block_num = 1
+            dropped_count = 0
+            while pos < len(file_data) and not self.abort_flag:
+                block_end = min(pos + 512, len(file_data))
+                block = file_data[pos:block_end]
+                
+                # 30% chance to drop packet
+                if random.random() < 0.3:
+                    self.tftp_msg_queue.put(f"🔴 DROPPED packet for block {block_num}\n")
+                    dropped_count += 1
+                else:
+                    data_pkt = struct.pack('!HH', 3, block_num) + block
+                    sock.sendto(data_pkt, addr)
+                    self.tftp_msg_queue.put(f"Sent block {block_num} ({len(block)} bytes)\n")
+                    
+                    # Wait for ACK
+                    while not self.abort_flag:
+                        try:
+                            ack, _ = sock.recvfrom(1024)
+                            break
+                        except BlockingIOError:
+                            time.sleep(0.01)
+                
+                pos += 512
+                block_num += 1
+            
+            self.tftp_msg_queue.put(f"Packet loss simulation complete - dropped {dropped_count} packets\n")
+        except Exception as e:
+            self.tftp_msg_queue.put(f"Error: {str(e)}\n")
+        finally:
+            if sock:
+                sock.close()
+            self.tftp_sock = None
+            self._stop_sending_flag = True
+    
     def normal_send_tftp(self):
         if self.sending:
             return
@@ -755,6 +1187,114 @@ class TFTPUDPApp:
             self.tftp_msg_queue.put(f"Swapped bytes at positions {pos1} and {pos2}\n")
         filename_req = os.path.basename(filename)
         self.tftp_thread = threading.Thread(target=self._send_tftp_worker, args=(ip, filename_req, file_data, total_bytes), daemon=True)
+        self.tftp_thread.start()
+    
+    def failure_out_of_order(self):
+        """Send blocks out of order"""
+        if self.sending:
+            return
+        ip = self.ip_entry.get()
+        filename = self.file_entry.get()
+        if not ip or not filename or not os.path.exists(filename):
+            messagebox.showerror("Error", "Invalid IP or file")
+            return
+        self.start_sending()
+        self.tftp_msg_queue.put(f"Starting out-of-order TFTP upload to {ip}: {filename}\n")
+        with open(filename, 'rb') as f:
+            file_data = bytearray(f.read())
+        total_bytes = len(file_data)
+        filename_req = os.path.basename(filename)
+        self.tftp_thread = threading.Thread(target=self._send_tftp_worker_out_of_order, args=(ip, filename_req, file_data, total_bytes), daemon=True)
+        self.tftp_thread.start()
+    
+    def failure_duplicate(self):
+        """Send some blocks twice"""
+        if self.sending:
+            return
+        ip = self.ip_entry.get()
+        filename = self.file_entry.get()
+        if not ip or not filename or not os.path.exists(filename):
+            messagebox.showerror("Error", "Invalid IP or file")
+            return
+        self.start_sending()
+        self.tftp_msg_queue.put(f"Starting duplicate blocks TFTP upload to {ip}: {filename}\n")
+        with open(filename, 'rb') as f:
+            file_data = bytearray(f.read())
+        total_bytes = len(file_data)
+        filename_req = os.path.basename(filename)
+        self.tftp_thread = threading.Thread(target=self._send_tftp_worker_duplicate, args=(ip, filename_req, file_data, total_bytes), daemon=True)
+        self.tftp_thread.start()
+    
+    def failure_wrong_numbers(self):
+        """Send blocks with wrong block numbers"""
+        if self.sending:
+            return
+        ip = self.ip_entry.get()
+        filename = self.file_entry.get()
+        if not ip or not filename or not os.path.exists(filename):
+            messagebox.showerror("Error", "Invalid IP or file")
+            return
+        self.start_sending()
+        self.tftp_msg_queue.put(f"Starting wrong block numbers TFTP upload to {ip}: {filename}\n")
+        with open(filename, 'rb') as f:
+            file_data = bytearray(f.read())
+        total_bytes = len(file_data)
+        filename_req = os.path.basename(filename)
+        self.tftp_thread = threading.Thread(target=self._send_tftp_worker_wrong_numbers, args=(ip, filename_req, file_data, total_bytes), daemon=True)
+        self.tftp_thread.start()
+    
+    def failure_truncated(self):
+        """Stop transfer early (truncated)"""
+        if self.sending:
+            return
+        ip = self.ip_entry.get()
+        filename = self.file_entry.get()
+        if not ip or not filename or not os.path.exists(filename):
+            messagebox.showerror("Error", "Invalid IP or file")
+            return
+        self.start_sending()
+        self.tftp_msg_queue.put(f"Starting truncated TFTP upload to {ip}: {filename}\n")
+        with open(filename, 'rb') as f:
+            file_data = bytearray(f.read())
+        total_bytes = len(file_data)
+        filename_req = os.path.basename(filename)
+        self.tftp_thread = threading.Thread(target=self._send_tftp_worker_truncated, args=(ip, filename_req, file_data, total_bytes), daemon=True)
+        self.tftp_thread.start()
+    
+    def failure_timeout(self):
+        """Pause mid-transfer to simulate timeout"""
+        if self.sending:
+            return
+        ip = self.ip_entry.get()
+        filename = self.file_entry.get()
+        if not ip or not filename or not os.path.exists(filename):
+            messagebox.showerror("Error", "Invalid IP or file")
+            return
+        self.start_sending()
+        self.tftp_msg_queue.put(f"Starting timeout TFTP upload to {ip}: {filename}\n")
+        with open(filename, 'rb') as f:
+            file_data = bytearray(f.read())
+        total_bytes = len(file_data)
+        filename_req = os.path.basename(filename)
+        self.tftp_thread = threading.Thread(target=self._send_tftp_worker_timeout, args=(ip, filename_req, file_data, total_bytes), daemon=True)
+        self.tftp_thread.start()
+    
+    def failure_packet_loss(self):
+        """Randomly drop packets"""
+        if self.sending:
+            return
+        ip = self.ip_entry.get()
+        filename = self.file_entry.get()
+        if not ip or not filename or not os.path.exists(filename):
+            messagebox.showerror("Error", "Invalid IP or file")
+            return
+        self.start_sending()
+        self.tftp_msg_queue.put(f"Starting packet loss TFTP upload to {ip}: {filename}\n")
+        with open(filename, 'rb') as f:
+            file_data = bytearray(f.read())
+        total_bytes = len(file_data)
+        filename_req = os.path.basename(filename)
+        self.tftp_thread = threading.Thread(target=self._send_tftp_worker_packet_loss, args=(ip, filename_req, file_data, total_bytes), daemon=True)
         self.tftp_thread.start()
     
     def toggle_udp(self):
