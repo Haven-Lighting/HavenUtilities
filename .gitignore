@@ -1,1 +1,28 @@
+# Python virtual environments
 venv/
+env/
+ENV/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# PyInstaller
+*.spec
+build/
+dist/
+
+# Binary files
+*.bin
+
+# OS files
+.DS_Store
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
