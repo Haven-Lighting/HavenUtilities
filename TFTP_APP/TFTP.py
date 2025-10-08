@@ -308,7 +308,8 @@ class TFTPUDPApp:
     def toggle_listen(self):
         """Start or stop TFTP listening"""
         if not self.tftp_listening:
-            ip = self.ip_entry.get()
+            # Get IP from the display label (in listen mode)
+            ip = self.ip_display.cget("text")
             filename = self.output_entry.get()
             try:
                 self.tftp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
