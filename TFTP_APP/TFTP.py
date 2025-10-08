@@ -137,7 +137,8 @@ class TFTPUDPApp:
         
         self.progress = ttk.Progressbar(self.tftp_frame, mode='indeterminate', length=200)
         
-        self.tftp_text = scrolledtext.ScrolledText(self.tftp_frame, height=8, state='disabled', bg='black', fg='white', insertbackground='white', font=('Arial', 10))
+        self.tftp_text = scrolledtext.ScrolledText(self.tftp_frame, height=8, state='disabled', bg='black', fg='white', 
+                                                    insertbackground='white', font=('Courier', 10), wrap='none')
         self.tftp_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
         self.poll_tftp_queue()
@@ -164,7 +165,8 @@ class TFTPUDPApp:
         self.write_btn = tk.Button(port_frame, text="UDP Write", command=self.open_write_popup, bg='#404040', fg='black', relief='flat')
         self.write_btn.pack(side=tk.LEFT, padx=5)
         
-        self.udp_text = scrolledtext.ScrolledText(self.udp_frame, height=15, state='disabled', bg='black', fg='white', insertbackground='white', font=('Arial', 12))
+        self.udp_text = scrolledtext.ScrolledText(self.udp_frame, height=15, state='disabled', bg='black', fg='white', 
+                                                   insertbackground='white', font=('Courier', 10), wrap='none')
         self.udp_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         # UDP Socket
