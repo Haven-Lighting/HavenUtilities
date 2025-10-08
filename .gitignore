@@ -14,6 +14,12 @@ __pycache__/
 build/
 dist/
 
+# Wine Python and installers
+python-windows/
+*.exe
+wine-mono.msi
+python-embed*.zip
+
 # Binary files
 *.bin
 

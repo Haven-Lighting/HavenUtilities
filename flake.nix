@@ -40,9 +40,16 @@
               python-pkgs.pyqt5
               python-pkgs.requests
               python-pkgs.tkinter
+              python-pkgs.pyinstaller
             ]))
             qt5.qtbase
             qt5.qtwayland
+            (with pkgs.dotnetCorePackages; combinePackages [
+              sdk_8_0
+              sdk_9_0
+            ])
+            wine
+            winetricks
             bashInteractive
             (vscode-with-extensions.override {
               vscode = pkgs.vscode;
