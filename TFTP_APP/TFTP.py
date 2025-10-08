@@ -203,9 +203,31 @@ class TFTPUDPApp:
         
         self.progress = ttk.Progressbar(self.tftp_frame, mode='indeterminate', length=200)
         
-        self.tftp_text = scrolledtext.ScrolledText(self.tftp_frame, height=8, state='disabled', bg='black', fg='white', 
-                                                    insertbackground='white', font=('Courier', 10), wrap='none')
-        self.tftp_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        # TFTP text area with both vertical and horizontal scrollbars
+        self.tftp_text_frame = tk.Frame(self.tftp_frame, bg='black')
+        self.tftp_text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # Create scrollbars
+        tftp_vscroll = tk.Scrollbar(self.tftp_text_frame, orient='vertical')
+        tftp_hscroll = tk.Scrollbar(self.tftp_text_frame, orient='horizontal')
+        
+        # Create text widget
+        self.tftp_text = tk.Text(self.tftp_text_frame, height=8, state='disabled', bg='black', fg='white', 
+                                 insertbackground='white', font=('Courier', 10), wrap='none',
+                                 yscrollcommand=tftp_vscroll.set, xscrollcommand=tftp_hscroll.set)
+        
+        # Configure scrollbars
+        tftp_vscroll.config(command=self.tftp_text.yview)
+        tftp_hscroll.config(command=self.tftp_text.xview)
+        
+        # Grid layout for text and scrollbars
+        self.tftp_text.grid(row=0, column=0, sticky='nsew')
+        tftp_vscroll.grid(row=0, column=1, sticky='ns')
+        tftp_hscroll.grid(row=1, column=0, sticky='ew')
+        
+        # Configure grid weights
+        self.tftp_text_frame.grid_rowconfigure(0, weight=1)
+        self.tftp_text_frame.grid_columnconfigure(0, weight=1)
         
         self.poll_tftp_queue()
         
@@ -231,9 +253,31 @@ class TFTPUDPApp:
         self.write_btn = tk.Button(port_frame, text="UDP Write", command=self.open_write_popup, bg='#404040', fg='black', relief='flat')
         self.write_btn.pack(side=tk.LEFT, padx=5)
         
-        self.udp_text = scrolledtext.ScrolledText(self.udp_frame, height=15, state='disabled', bg='black', fg='white', 
-                                                   insertbackground='white', font=('Courier', 10), wrap='none')
-        self.udp_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # UDP text area with both vertical and horizontal scrollbars
+        udp_text_frame = tk.Frame(self.udp_frame, bg='black')
+        udp_text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Create scrollbars
+        udp_vscroll = tk.Scrollbar(udp_text_frame, orient='vertical')
+        udp_hscroll = tk.Scrollbar(udp_text_frame, orient='horizontal')
+        
+        # Create text widget
+        self.udp_text = tk.Text(udp_text_frame, height=15, state='disabled', bg='black', fg='white', 
+                                insertbackground='white', font=('Courier', 10), wrap='none',
+                                yscrollcommand=udp_vscroll.set, xscrollcommand=udp_hscroll.set)
+        
+        # Configure scrollbars
+        udp_vscroll.config(command=self.udp_text.yview)
+        udp_hscroll.config(command=self.udp_text.xview)
+        
+        # Grid layout for text and scrollbars
+        self.udp_text.grid(row=0, column=0, sticky='nsew')
+        udp_vscroll.grid(row=0, column=1, sticky='ns')
+        udp_hscroll.grid(row=1, column=0, sticky='ew')
+        
+        # Configure grid weights
+        udp_text_frame.grid_rowconfigure(0, weight=1)
+        udp_text_frame.grid_columnconfigure(0, weight=1)
         
         # UDP Socket
         self.udp_sock = None
@@ -283,7 +327,7 @@ class TFTPUDPApp:
         
         if mode == "send":
             # Show send controls, hide listen controls
-            self.send_frame.pack(pady=5, before=self.tftp_text)
+            self.send_frame.pack(pady=5, before=self.tftp_text_frame)
             self.listen_frame.pack_forget()
             
             # Update IP label and show entry field, hide display label
@@ -296,7 +340,7 @@ class TFTPUDPApp:
         else:  # listen mode
             # Show listen controls, hide send controls
             self.send_frame.pack_forget()
-            self.listen_frame.pack(pady=5, before=self.tftp_text)
+            self.listen_frame.pack(pady=5, before=self.tftp_text_frame)
             
             # Update IP label and show display label, hide entry field
             self.ip_label.config(text="Listen IP:")
@@ -513,8 +557,8 @@ class TFTPUDPApp:
         self.fail_truncated_btn.config(state='disabled')
         self.fail_timeout_btn.config(state='disabled')
         self.fail_pktloss_btn.config(state='disabled')
-        self.abort_frame.pack(pady=5, before=self.tftp_text)
-        self.progress.pack(pady=5, before=self.tftp_text)
+        self.abort_frame.pack(pady=5, before=self.tftp_text_frame)
+        self.progress.pack(pady=5, before=self.tftp_text_frame)
         self.progress.start()
         self.tftp_msg_queue.put("Sending...\n")
         # Disable mode switching during send
