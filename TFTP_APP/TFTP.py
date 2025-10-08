@@ -64,6 +64,7 @@ class TFTPUDPApp:
         self.tftp_mode = "send"  # "send" or "listen"
         self.tftp_listening = False
         self.tftp_listen_thread = None
+        self._stop_sending_flag = False
         
         # Top half: TFTP Panel
         self.tftp_frame = tk.Frame(root, height=300, bg='#2c2c2c')
@@ -184,6 +185,11 @@ class TFTPUDPApp:
         except queue.Empty:
             pass
         self.root.after(100, self.poll_tftp_queue)
+        
+        # Check if we need to stop sending
+        if hasattr(self, '_stop_sending_flag') and self._stop_sending_flag:
+            self._stop_sending_flag = False
+            self.stop_sending()
     
     def get_local_ip(self):
         """Get the local IP address of this computer"""
@@ -432,9 +438,12 @@ class TFTPUDPApp:
         self.progress.pack(pady=5, before=self.tftp_text)
         self.progress.start()
         self.tftp_msg_queue.put("Sending...\n")
-        # Testing
+        # Disable mode switching during send
+        self.send_radio.config(state='disabled')
+        self.listen_radio.config(state='disabled')
     
     def stop_sending(self):
+        self.tftp_msg_queue.put("Cleaning up send UI...\n")
         self.sending = False
         self.normal_send_btn.config(state='normal')
         self.corrupt_send_btn.config(state='normal')
@@ -442,6 +451,9 @@ class TFTPUDPApp:
         self.abort_frame.pack_forget()
         self.progress.stop()
         self.progress.pack_forget()
+        # Re-enable mode switching after send
+        self.send_radio.config(state='normal')
+        self.listen_radio.config(state='normal')
     
     def abort_send(self):
         self.abort_flag = True
@@ -553,7 +565,8 @@ class TFTPUDPApp:
             if sock:
                 sock.close()
             self.tftp_sock = None
-            self.root.after(0, self.stop_sending)
+            # Signal the main thread to stop sending UI
+            self._stop_sending_flag = True
     
     def _send_tftp_worker_corrupt(self, ip, filename_req, file_data, total_bytes):
         sock = None
@@ -670,7 +683,8 @@ class TFTPUDPApp:
                 sock.close()
             self.tftp_sock = None
             self.corrupt_mode = False
-            self.root.after(0, self.stop_sending)
+            # Signal the main thread to stop sending UI
+            self._stop_sending_flag = True
     
     def normal_send_tftp(self):
         if self.sending:
