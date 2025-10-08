@@ -39,6 +39,7 @@
               python-pkgs.pyserial
               python-pkgs.pyqt5
               python-pkgs.requests
+              python-pkgs.tkinter
             ]))
             qt5.qtbase
             qt5.qtwayland
