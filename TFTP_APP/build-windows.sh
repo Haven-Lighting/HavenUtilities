@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -e  # Exit on error
 
 echo "=================================="
@@ -89,7 +89,7 @@ fi
 # Step 4: Verify tkinter
 echo ""
 echo "Step 4: Verifying tkinter is available..."
-TKINTER_TEST=$(WINEDEBUG=-all wine "$WINE_PYTHON" -c "import tkinter; print('OK')" 2>&1 | grep "OK")
+TKINTER_TEST=$(WINEDEBUG=-all wine "$WINE_PYTHON" -c "import tkinter; print('OK')" 2>&1 | grep -o "OK")
 if [[ "$TKINTER_TEST" != "OK" ]]; then
     echo "ERROR: tkinter is not available in Python installation!"
     echo "Python may not have installed correctly."
