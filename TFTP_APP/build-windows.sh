@@ -1,8 +1,22 @@
 #!/usr/bin/env bash
 set -e  # Exit on error
 
+# Check if version parameter is provided
+if [ -z "$1" ]; then
+    echo "ERROR: Version parameter required!"
+    echo "Usage: ./build-windows.sh <version>"
+    echo "Example: ./build-windows.sh 4.0.0"
+    exit 1
+fi
+
+VERSION="$1"
+# Replace dots with underscores for filename
+VERSION_SAFE="${VERSION//./_}"
+APP_NAME="TFTP_APP_${VERSION_SAFE}"
+
 echo "=================================="
 echo "Windows Build Script for HavenTFTP"
+echo "Version: $VERSION"
 echo "=================================="
 echo ""
 
@@ -125,7 +139,7 @@ echo ""
 cd "$SCRIPT_DIR"
 
 # Run PyInstaller and capture output
-WINEDEBUG=-all wine "$WINE_PYTHON" -m PyInstaller --clean --onefile --name HavenTFTP TFTP.py 2>&1 | \
+WINEDEBUG=-all wine "$WINE_PYTHON" -m PyInstaller --clean --onefile --name "$APP_NAME" TFTP.py 2>&1 | \
     while IFS= read -r line; do
         if [[ "$line" =~ INFO.*Building|INFO.*completed|WARNING|ERROR ]]; then
             echo "  $line"
@@ -134,23 +148,23 @@ WINEDEBUG=-all wine "$WINE_PYTHON" -m PyInstaller --clean --onefile --name Haven
 
 # Step 8: Verify build
 echo ""
-if [ -f "$SCRIPT_DIR/dist/HavenTFTP.exe" ]; then
-    FILE_SIZE=$(ls -lh "$SCRIPT_DIR/dist/HavenTFTP.exe" | awk '{print $5}')
-    FILE_TYPE=$(file "$SCRIPT_DIR/dist/HavenTFTP.exe" | cut -d: -f2)
+if [ -f "$SCRIPT_DIR/dist/${APP_NAME}.exe" ]; then
+    FILE_SIZE=$(ls -lh "$SCRIPT_DIR/dist/${APP_NAME}.exe" | awk '{print $5}')
+    FILE_TYPE=$(file "$SCRIPT_DIR/dist/${APP_NAME}.exe" | cut -d: -f2)
     
     echo "=================================="
     echo "✓ BUILD SUCCESSFUL!"
     echo "=================================="
     echo ""
     echo "Executable Location:"
-    echo "  $SCRIPT_DIR/dist/HavenTFTP.exe"
+    echo "  $SCRIPT_DIR/dist/${APP_NAME}.exe"
     echo ""
     echo "File Details:"
     echo "  Size: $FILE_SIZE"
     echo "  Type:$FILE_TYPE"
     echo ""
     echo "Deployment Instructions:"
-    echo "  1. Transfer HavenTFTP.exe to Windows machine"
+    echo "  1. Transfer ${APP_NAME}.exe to Windows machine"
     echo "  2. Right-click → 'Run as Administrator'"
     echo "     (Required for binding to port 69)"
     echo "  3. Allow through Windows Firewall if prompted"
