@@ -87,8 +87,6 @@ class TFTPUDPApp:
         self.abort_flag = False
         self.tftp_sock = None
         self.tftp_msg_queue = queue.Queue()
-        self.corrupt_mode = False
-        self.blocks_to_skip = set()
         self.tftp_mode = "send"  # "send" or "listen"
         self.tftp_listening = False
         self.tftp_listen_thread = None
@@ -119,9 +117,15 @@ class TFTPUDPApp:
         ip_frame.pack(pady=5)
         self.ip_label = tk.Label(ip_frame, text="Target IP:", fg='white', bg='#2c2c2c')
         self.ip_label.pack(side=tk.LEFT)
+        
+        # IP Entry (for Send mode)
         self.ip_entry = tk.Entry(ip_frame, width=20, bg='#404040', fg='white', insertbackground='white', font=('Arial', 12))
         self.ip_entry.pack(side=tk.LEFT, padx=5)
         self.ip_entry.insert(0, "10.10.2.46")
+        
+        # IP Display Label (for Listen mode - initially hidden)
+        self.ip_display = tk.Label(ip_frame, text="", fg='white', bg='#2c2c2c', font=('Arial', 12), width=20, anchor='w')
+        # Don't pack it yet - will be shown in listen mode
         
         # Send mode controls
         self.send_frame = tk.Frame(self.tftp_frame, bg='#2c2c2c')
@@ -134,46 +138,49 @@ class TFTPUDPApp:
         self.file_entry.pack(side=tk.LEFT, padx=5)
         tk.Button(file_frame, text="Browse", command=self.browse_file, bg='#404040', fg='black', relief='flat').pack(side=tk.LEFT, padx=5)
         
+        # Send header
+        tk.Label(self.send_frame, text="Send", fg='white', bg='#2c2c2c', font=('Arial', 10, 'bold')).pack(pady=(10, 2))
+        
         btn_frame = tk.Frame(self.send_frame, bg='#2c2c2c')
-        btn_frame.pack(pady=10)
-        self.normal_send_btn = tk.Button(btn_frame, text="TFTP Send", command=self.normal_send_tftp, bg='#1a1a1a', fg='white', relief='flat')
+        btn_frame.pack(pady=5)
+        self.normal_send_btn = tk.Button(btn_frame, text="TFTP Send", command=self.normal_send_tftp, bg='#00aa00', fg='white', relief='flat')
         self.normal_send_btn.pack(side=tk.LEFT, padx=5)
-        self.corrupt_send_btn = tk.Button(btn_frame, text="TFTP Corrupt Send", command=self.corrupt_send_tftp, bg='#ffaa00', fg='black', relief='flat')
-        self.corrupt_send_btn.pack(side=tk.LEFT, padx=5)
-        self.swap_send_btn = tk.Button(btn_frame, text="TFTP Swap Send", command=self.swap_send_tftp, bg='#00ff00', fg='black', relief='flat')
-        self.swap_send_btn.pack(side=tk.LEFT, padx=5)
         
         # Failure simulation buttons - First row
-        tk.Label(self.send_frame, text="Failure Simulations:", fg='#888888', bg='#2c2c2c', font=('Arial', 9)).pack(pady=(5, 2))
+        tk.Label(self.send_frame, text="Failure Simulations:", fg='#888888', bg='#2c2c2c', font=('Arial', 9)).pack(pady=(10, 2))
         
         btn_frame2 = tk.Frame(self.send_frame, bg='#2c2c2c')
         btn_frame2.pack(pady=2)
-        self.fail_outoforder_btn = tk.Button(btn_frame2, text="Out-of-Order", command=self.failure_out_of_order, bg='#ff00ff', fg='white', relief='flat', width=12)
+        self.fail_outoforder_btn = tk.Button(btn_frame2, text="Out-of-Order", command=self.failure_out_of_order, bg='#ff0000', fg='white', relief='flat', width=12)
         self.fail_outoforder_btn.pack(side=tk.LEFT, padx=3)
         self.create_tooltip(self.fail_outoforder_btn, "Sends blocks 1,2,4,3,5,6... to test handling of misordered packets")
         
-        self.fail_duplicate_btn = tk.Button(btn_frame2, text="Duplicates", command=self.failure_duplicate, bg='#ff00ff', fg='white', relief='flat', width=12)
+        self.fail_duplicate_btn = tk.Button(btn_frame2, text="Duplicates", command=self.failure_duplicate, bg='#ff0000', fg='white', relief='flat', width=12)
         self.fail_duplicate_btn.pack(side=tk.LEFT, padx=3)
         self.create_tooltip(self.fail_duplicate_btn, "Sends some blocks twice to test duplicate detection")
         
-        self.fail_wrongnum_btn = tk.Button(btn_frame2, text="Wrong Block #", command=self.failure_wrong_numbers, bg='#ff00ff', fg='white', relief='flat', width=12)
+        self.fail_wrongnum_btn = tk.Button(btn_frame2, text="Wrong Block #", command=self.failure_wrong_numbers, bg='#ff0000', fg='white', relief='flat', width=12)
         self.fail_wrongnum_btn.pack(side=tk.LEFT, padx=3)
         self.create_tooltip(self.fail_wrongnum_btn, "Uses incorrect block numbering to test validation")
         
         # Failure simulation buttons - Second row
         btn_frame3 = tk.Frame(self.send_frame, bg='#2c2c2c')
         btn_frame3.pack(pady=2)
-        self.fail_truncated_btn = tk.Button(btn_frame3, text="Truncated", command=self.failure_truncated, bg='#ff00ff', fg='white', relief='flat', width=12)
+        self.fail_truncated_btn = tk.Button(btn_frame3, text="Truncated", command=self.failure_truncated, bg='#ff0000', fg='white', relief='flat', width=12)
         self.fail_truncated_btn.pack(side=tk.LEFT, padx=3)
         self.create_tooltip(self.fail_truncated_btn, "Stops after sending 60% of file to test incomplete transfers")
         
-        self.fail_timeout_btn = tk.Button(btn_frame3, text="Timeout", command=self.failure_timeout, bg='#ff00ff', fg='white', relief='flat', width=12)
+        self.fail_timeout_btn = tk.Button(btn_frame3, text="Timeout", command=self.failure_timeout, bg='#ff0000', fg='white', relief='flat', width=12)
         self.fail_timeout_btn.pack(side=tk.LEFT, padx=3)
         self.create_tooltip(self.fail_timeout_btn, "Pauses 10 seconds mid-transfer to test timeout handling")
         
-        self.fail_pktloss_btn = tk.Button(btn_frame3, text="Packet Loss", command=self.failure_packet_loss, bg='#ff00ff', fg='white', relief='flat', width=12)
+        self.fail_pktloss_btn = tk.Button(btn_frame3, text="Packet Loss", command=self.failure_packet_loss, bg='#ff0000', fg='white', relief='flat', width=12)
         self.fail_pktloss_btn.pack(side=tk.LEFT, padx=3)
         self.create_tooltip(self.fail_pktloss_btn, "Randomly drops ~30% of packets to test loss detection")
+        
+        self.swap_send_btn = tk.Button(btn_frame3, text="Data Swap", command=self.swap_send_tftp, bg='#ff0000', fg='white', relief='flat', width=12)
+        self.swap_send_btn.pack(side=tk.LEFT, padx=3)
+        self.create_tooltip(self.swap_send_btn, "Swaps two random bytes in file data to test data corruption detection")
         
         # Listen mode controls
         self.listen_frame = tk.Frame(self.tftp_frame, bg='#2c2c2c')
@@ -197,9 +204,31 @@ class TFTPUDPApp:
         
         self.progress = ttk.Progressbar(self.tftp_frame, mode='indeterminate', length=200)
         
-        self.tftp_text = scrolledtext.ScrolledText(self.tftp_frame, height=8, state='disabled', bg='black', fg='white', 
-                                                    insertbackground='white', font=('Courier', 10), wrap='none')
-        self.tftp_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        # TFTP text area with both vertical and horizontal scrollbars
+        self.tftp_text_frame = tk.Frame(self.tftp_frame, bg='black')
+        self.tftp_text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # Create scrollbars
+        tftp_vscroll = tk.Scrollbar(self.tftp_text_frame, orient='vertical')
+        tftp_hscroll = tk.Scrollbar(self.tftp_text_frame, orient='horizontal')
+        
+        # Create text widget
+        self.tftp_text = tk.Text(self.tftp_text_frame, height=8, state='disabled', bg='black', fg='white', 
+                                 insertbackground='white', font=('Courier', 10), wrap='none',
+                                 yscrollcommand=tftp_vscroll.set, xscrollcommand=tftp_hscroll.set)
+        
+        # Configure scrollbars
+        tftp_vscroll.config(command=self.tftp_text.yview)
+        tftp_hscroll.config(command=self.tftp_text.xview)
+        
+        # Grid layout for text and scrollbars
+        self.tftp_text.grid(row=0, column=0, sticky='nsew')
+        tftp_vscroll.grid(row=0, column=1, sticky='ns')
+        tftp_hscroll.grid(row=1, column=0, sticky='ew')
+        
+        # Configure grid weights
+        self.tftp_text_frame.grid_rowconfigure(0, weight=1)
+        self.tftp_text_frame.grid_columnconfigure(0, weight=1)
         
         self.poll_tftp_queue()
         
@@ -225,9 +254,31 @@ class TFTPUDPApp:
         self.write_btn = tk.Button(port_frame, text="UDP Write", command=self.open_write_popup, bg='#404040', fg='black', relief='flat')
         self.write_btn.pack(side=tk.LEFT, padx=5)
         
-        self.udp_text = scrolledtext.ScrolledText(self.udp_frame, height=15, state='disabled', bg='black', fg='white', 
-                                                   insertbackground='white', font=('Courier', 10), wrap='none')
-        self.udp_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # UDP text area with both vertical and horizontal scrollbars
+        udp_text_frame = tk.Frame(self.udp_frame, bg='black')
+        udp_text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Create scrollbars
+        udp_vscroll = tk.Scrollbar(udp_text_frame, orient='vertical')
+        udp_hscroll = tk.Scrollbar(udp_text_frame, orient='horizontal')
+        
+        # Create text widget
+        self.udp_text = tk.Text(udp_text_frame, height=15, state='disabled', bg='black', fg='white', 
+                                insertbackground='white', font=('Courier', 10), wrap='none',
+                                yscrollcommand=udp_vscroll.set, xscrollcommand=udp_hscroll.set)
+        
+        # Configure scrollbars
+        udp_vscroll.config(command=self.udp_text.yview)
+        udp_hscroll.config(command=self.udp_text.xview)
+        
+        # Grid layout for text and scrollbars
+        self.udp_text.grid(row=0, column=0, sticky='nsew')
+        udp_vscroll.grid(row=0, column=1, sticky='ns')
+        udp_hscroll.grid(row=1, column=0, sticky='ew')
+        
+        # Configure grid weights
+        udp_text_frame.grid_rowconfigure(0, weight=1)
+        udp_text_frame.grid_columnconfigure(0, weight=1)
         
         # UDP Socket
         self.udp_sock = None
@@ -277,32 +328,33 @@ class TFTPUDPApp:
         
         if mode == "send":
             # Show send controls, hide listen controls
-            self.send_frame.pack(pady=5, before=self.tftp_text)
+            self.send_frame.pack(pady=5, before=self.tftp_text_frame)
             self.listen_frame.pack_forget()
             
-            # Update IP label and make entry editable
+            # Update IP label and show entry field, hide display label
             self.ip_label.config(text="Target IP:")
-            self.ip_entry.config(state='normal', bg='#404040')
+            self.ip_display.pack_forget()
+            self.ip_entry.pack(side=tk.LEFT, padx=5)
             if self.ip_entry.get() == self.get_local_ip():
                 self.ip_entry.delete(0, tk.END)
                 self.ip_entry.insert(0, "10.10.2.46")
         else:  # listen mode
             # Show listen controls, hide send controls
             self.send_frame.pack_forget()
-            self.listen_frame.pack(pady=5, before=self.tftp_text)
+            self.listen_frame.pack(pady=5, before=self.tftp_text_frame)
             
-            # Update IP label and show local IP (read-only)
+            # Update IP label and show display label, hide entry field
             self.ip_label.config(text="Listen IP:")
             local_ip = self.get_local_ip()
-            self.ip_entry.config(state='normal')
-            self.ip_entry.delete(0, tk.END)
-            self.ip_entry.insert(0, local_ip)
-            self.ip_entry.config(state='readonly', bg='#303030')
+            self.ip_entry.pack_forget()
+            self.ip_display.config(text=local_ip)
+            self.ip_display.pack(side=tk.LEFT, padx=5)
     
     def toggle_listen(self):
         """Start or stop TFTP listening"""
         if not self.tftp_listening:
-            ip = self.ip_entry.get()
+            # Get IP from the display label (in listen mode)
+            ip = self.ip_display.cget("text")
             filename = self.output_entry.get()
             try:
                 self.tftp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -498,7 +550,6 @@ class TFTPUDPApp:
         self.sending = True
         self.abort_flag = False
         self.normal_send_btn.config(state='disabled')
-        self.corrupt_send_btn.config(state='disabled')
         self.swap_send_btn.config(state='disabled')
         self.fail_outoforder_btn.config(state='disabled')
         self.fail_duplicate_btn.config(state='disabled')
@@ -506,8 +557,8 @@ class TFTPUDPApp:
         self.fail_truncated_btn.config(state='disabled')
         self.fail_timeout_btn.config(state='disabled')
         self.fail_pktloss_btn.config(state='disabled')
-        self.abort_frame.pack(pady=5, before=self.tftp_text)
-        self.progress.pack(pady=5, before=self.tftp_text)
+        self.abort_frame.pack(pady=5, before=self.tftp_text_frame)
+        self.progress.pack(pady=5, before=self.tftp_text_frame)
         self.progress.start()
         self.tftp_msg_queue.put("Sending...\n")
         # Disable mode switching during send
@@ -518,7 +569,6 @@ class TFTPUDPApp:
         self.tftp_msg_queue.put("Cleaning up send UI...\n")
         self.sending = False
         self.normal_send_btn.config(state='normal')
-        self.corrupt_send_btn.config(state='normal')
         self.swap_send_btn.config(state='normal')
         self.fail_outoforder_btn.config(state='normal')
         self.fail_duplicate_btn.config(state='normal')
@@ -643,124 +693,6 @@ class TFTPUDPApp:
             if sock:
                 sock.close()
             self.tftp_sock = None
-            # Signal the main thread to stop sending UI
-            self._stop_sending_flag = True
-    
-    def _send_tftp_worker_corrupt(self, ip, filename_req, file_data, total_bytes):
-        sock = None
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.setblocking(False)
-            self.tftp_sock = sock
-            
-            # WRQ packet with options
-            opcode = 2
-            mode = b'octet'
-            wrq = struct.pack('!H', opcode) + filename_req.encode() + b'\0' + mode + b'\0size\0' + str(total_bytes).encode() + b'\0'
-            sock.sendto(wrq, (ip, 69))
-            self.tftp_msg_queue.put(f"Sent WRQ with size {total_bytes}\n")
-            
-            # Receive OACK or ACK 0
-            received_resp = False
-            while not self.abort_flag and not received_resp:
-                try:
-                    data, addr = sock.recvfrom(1024)
-                    received_resp = True
-                except BlockingIOError:
-                    time.sleep(0.01)
-                    continue
-                except OSError:
-                    if self.abort_flag:
-                        raise Exception("Aborted during WRQ response")
-                    raise
-            if not received_resp:
-                raise Exception("Aborted during WRQ response")
-            
-            resp_opcode = struct.unpack('!H', data[:2])[0]
-            if resp_opcode not in (4, 6):
-                raise Exception("Unexpected response to WRQ")
-            if resp_opcode == 6:
-                # Parse OACK options (optional, for confirmation)
-                opt_data = data[2:]
-                confirmed_size = None
-                while len(opt_data) > 0:
-                    key_end = opt_data.find(b'\0')
-                    if key_end == -1:
-                        break
-                    key = opt_data[:key_end].decode()
-                    opt_data = opt_data[key_end + 1:]
-                    val_end = opt_data.find(b'\0')
-                    if val_end == -1:
-                        break
-                    val = opt_data[:val_end].decode()
-                    opt_data = opt_data[val_end + 1:]
-                    if key == 'size':
-                        confirmed_size = int(val)
-                self.tftp_msg_queue.put(f"Received OACK with confirmed size {confirmed_size}\n")
-            
-            # Send file in blocks (skipping some for corruption)
-            pos = 0
-            block_num = 1
-            actual_bytes_sent = 0
-            while pos < len(file_data) and not self.abort_flag:
-                block_end = min(pos + 512, len(file_data))
-                block = file_data[pos:block_end]
-                
-                # Skip this block if it's in our corruption list
-                if block_num in self.blocks_to_skip:
-                    self.tftp_msg_queue.put(f"SKIPPING block {block_num} (corruption mode)\n")
-                    pos += 512
-                    block_num += 1
-                    continue
-                
-                data_pkt = struct.pack('!HH', 3, block_num) + block
-                sock.sendto(data_pkt, addr)
-                actual_bytes_sent += len(block)
-                
-                hex_data = binascii.hexlify(block).decode()
-                if len(hex_data) > 200:
-                    hex_data = hex_data[:200] + '...'
-                self.tftp_msg_queue.put(f"Sent block {block_num} ({len(block)} bytes): {hex_data}\n")
-                
-                # Wait for ACK
-                received_ack = False
-                ack = None
-                while not self.abort_flag and not received_ack:
-                    try:
-                        ack, _ = sock.recvfrom(1024)
-                        received_ack = True
-                    except BlockingIOError:
-                        time.sleep(0.01)
-                        continue
-                    except OSError:
-                        if self.abort_flag:
-                            break
-                        raise
-                
-                if not received_ack:
-                    break
-                
-                if struct.unpack('!HH', ack[:4])[0] != 4 or struct.unpack('!H', ack[2:4])[0] != block_num:
-                    raise Exception("ACK mismatch")
-                
-                pos += 512
-                block_num += 1
-            
-            if self.abort_flag:
-                self.tftp_msg_queue.put(f"Upload aborted: {actual_bytes_sent} bytes sent\n")
-            else:
-                missing_bytes = total_bytes - actual_bytes_sent
-                self.tftp_msg_queue.put(f"Corrupt upload complete: {actual_bytes_sent} bytes sent (missing {missing_bytes} bytes)\n")
-        except Exception as e:
-            if self.abort_flag:
-                self.tftp_msg_queue.put(f"Upload aborted\n")
-            else:
-                self.tftp_msg_queue.put(f"Error: {str(e)}\n")
-        finally:
-            if sock:
-                sock.close()
-            self.tftp_sock = None
-            self.corrupt_mode = False
             # Signal the main thread to stop sending UI
             self._stop_sending_flag = True
     
@@ -1135,34 +1067,6 @@ class TFTPUDPApp:
         total_bytes = len(file_data)
         filename_req = os.path.basename(filename)
         self.tftp_thread = threading.Thread(target=self._send_tftp_worker, args=(ip, filename_req, file_data, total_bytes), daemon=True)
-        self.tftp_thread.start()
-    
-    def corrupt_send_tftp(self):
-        if self.sending:
-            return
-        ip = self.ip_entry.get()
-        filename = self.file_entry.get()
-        if not ip or not filename or not os.path.exists(filename):
-            messagebox.showerror("Error", "Invalid IP or file")
-            return
-        self.start_sending()
-        self.tftp_msg_queue.put(f"Starting corrupt TFTP upload to {ip}: {filename}\n")
-        with open(filename, 'rb') as f:
-            file_data = bytearray(f.read())
-        original_total = len(file_data)
-        
-        # Create corruption by skipping some blocks during transmission
-        self.corrupt_mode = True
-        self.blocks_to_skip = set()
-        if original_total > 1536:  # At least 3 blocks
-            num_blocks = (original_total + 511) // 512
-            num_to_skip = min(3, num_blocks // 4)  # Skip up to 3 blocks or 25% of blocks
-            self.blocks_to_skip = set(random.sample(range(2, num_blocks), num_to_skip))
-            self.tftp_msg_queue.put(f"Will intentionally skip blocks: {sorted(self.blocks_to_skip)}\n")
-        
-        total_bytes = original_total  # Report original size but skip blocks
-        filename_req = os.path.basename(filename)
-        self.tftp_thread = threading.Thread(target=self._send_tftp_worker_corrupt, args=(ip, filename_req, file_data, total_bytes), daemon=True)
         self.tftp_thread.start()
     
     def swap_send_tftp(self):

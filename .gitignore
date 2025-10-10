@@ -12,7 +12,11 @@ __pycache__/
 # PyInstaller
 *.spec
 build/
-dist/
+
+# Wine Python and installers
+python-windows/
+wine-mono.msi
+python-embed*.zip
 
 # Binary files
 *.bin

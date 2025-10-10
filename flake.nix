@@ -40,9 +40,11 @@
               python-pkgs.pyqt5
               python-pkgs.requests
               python-pkgs.tkinter
+              python-pkgs.pyinstaller
             ]))
             qt5.qtbase
             qt5.qtwayland
+            wine
             bashInteractive
             (vscode-with-extensions.override {
               vscode = pkgs.vscode;
