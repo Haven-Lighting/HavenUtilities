@@ -1,0 +1,6 @@
+Command Table
+Channel,Start_Time,R,G,B,Duration_ms,Color_Hex
+vc1,0.000,100.0,0.0,0.0,100,#FF0000
+vc2,0.100,0.0,100.0,0.0,200,#00FF00
+vc1,0.200,0.0,0.0,100.0,150,#0000FF
+vc3,0.500,100.0,100.0,0.0,300,#FFFF00
