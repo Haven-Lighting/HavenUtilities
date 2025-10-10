@@ -25,11 +25,9 @@
         commands = import ./commands.nix { inherit pkgs; };
       in
       {
-        packages.${system} = {
-          default = pkgs.writeShellScriptBin "run" ''
-            nix develop -c -- codium .
-          '';
-        };
+        packages.default = pkgs.writeShellScriptBin "run" ''
+          nix develop -c -- codium .
+        '';
 
         devShells.default = pkgs.mkShell rec {
           name = "PythonDevShell";
