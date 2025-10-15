@@ -14,6 +14,9 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext
 import threading
 import queue as qmod
+import json
+import os
+import sys
 #testing
 def get_available_ports():
     try:
@@ -25,6 +28,29 @@ def get_available_ports():
         ports = glob.glob('/dev/tty.usb*') + glob.glob('/dev/cu.usb*')
         ports = [f"{p} - USB Serial Device (Fallback)" for p in ports if 'usbserial' in p or 'usbmodem' in p]
     return ports if ports else ["No ports available"]
+
+def save_last_port(port):
+    """Save the last used COM port to a config file"""
+    try:
+        config_dir = os.path.dirname(os.path.abspath(__file__))
+        config_file = os.path.join(config_dir, 'port_config.json')
+        with open(config_file, 'w') as f:
+            json.dump({'last_port': port}, f)
+    except Exception as e:
+        print(f"Error saving port config: {e}")
+
+def load_last_port():
+    """Load the last used COM port from config file"""
+    try:
+        config_dir = os.path.dirname(os.path.abspath(__file__))
+        config_file = os.path.join(config_dir, 'port_config.json')
+        if os.path.exists(config_file):
+            with open(config_file, 'r') as f:
+                config = json.load(f)
+                return config.get('last_port', None)
+    except Exception as e:
+        print(f"Error loading port config: {e}")
+    return None
 
 def pygame_process(q):
     pygame.init()
@@ -348,7 +374,7 @@ def pygame_process(q):
                             slider_type = "rainbow_speed"
                         elif slider_open and slider_rect.collidepoint(event.pos):
                             slider_pos = (event.pos[0] - slider_rect.x) / slider_rect.width
-                            rainbow_speed = 0.01 + slider_pos * (0.2 - 0.01)
+                            rainbow_speed = 0 + slider_pos * (15 - 0)
                     elif selected_effect == "Comet":
                         if comet_reverse_rect.collidepoint(event.pos):
                             comet_direction *= -1
@@ -582,7 +608,7 @@ def pygame_process(q):
                 if slider_open and slider_type == "rainbow_speed":
                     pygame.draw.rect(screen, (31, 41, 55), slider_rect, border_radius=6)
                     pygame.draw.rect(screen, (209, 213, 219), slider_rect, 1, border_radius=6)
-                    slider_pos = (rainbow_speed - 0.01) / (0.2 - 0.01)
+                    slider_pos = (rainbow_speed - 0) / (15 - 0)
                     knob_x = slider_rect.x + slider_pos * slider_rect.width
                     pygame.draw.circle(screen, (59, 130, 246), (int(knob_x), slider_rect.centery), 8)
             elif selected_effect == "Comet":
@@ -764,6 +790,7 @@ def pygame_process(q):
 
     q.put(None)
     pygame.quit()
+    sys.exit(0)  # Ensure process exits
 
 def tkinter_process(q):
     root = tk.Tk()
@@ -773,7 +800,16 @@ def tkinter_process(q):
     tk.Label(root, text="COM Port:").pack(pady=5)
     ports = get_available_ports()
     port_list = [p.split(" - ")[0] for p in ports if "No ports" not in p]
-    port_var = tk.StringVar(value=port_list[0] if port_list else "")
+    
+    # Load last used port and set as default if available
+    last_port = load_last_port()
+    default_port = ""
+    if last_port and last_port in port_list:
+        default_port = last_port
+    elif port_list:
+        default_port = port_list[0]
+    
+    port_var = tk.StringVar(value=default_port)
     port_combo = ttk.Combobox(root, textvariable=port_var, values=port_list, state="readonly")
     port_combo.pack(pady=5)
 
@@ -847,6 +883,8 @@ def tkinter_process(q):
         try:
             ser = serial.Serial(port, baud, timeout=0.1)
             connected = True
+            # Save the port for next time
+            save_last_port(port)
             connect_btn.config(text="Disconnect", state=tk.NORMAL)
             port_combo.config(state=tk.DISABLED)
             baud_combo.config(state=tk.DISABLED)
@@ -949,7 +987,7 @@ def tkinter_process(q):
         nonlocal test_sending, test_thread
         if connected and not test_sending:
             test_sending = True
-            test_btn.config(text="Stop Test", state=tk.DISABLED)
+            test_btn.config(text="Stop Test", state=tk.NORMAL)
             term_queue.put("Starting test cycle...")
             test_thread = threading.Thread(target=test_loop, daemon=True)
             test_thread.start()
@@ -1006,15 +1044,49 @@ def tkinter_process(q):
     stop_btn.config(command=stop_sending)
     test_btn.config(command=toggle_test)
 
+    def on_closing():
+        stop_sending()
+        stop_test()
+        disconnect()
+        root.quit()
+        root.destroy()
+        sys.exit(0)  # Force exit the tkinter process
+
     root.after(100, update_terminal)
-    root.protocol("WM_DELETE_WINDOW", lambda: (stop_sending(), stop_test(), disconnect(), root.quit()))
+    root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
+    sys.exit(0)  # Ensure process exits after mainloop ends
 
 if __name__ == '__main__':
     q = Queue()
     p1 = mp.Process(target=pygame_process, args=(q,))
     p2 = mp.Process(target=tkinter_process, args=(q,))
+    
+    # Set daemon to True so processes die when main exits
+    p1.daemon = True
+    p2.daemon = True
+    
     p1.start()
     p2.start()
-    p1.join()
-    p2.join()
+    
+    try:
+        # Wait for either process to end
+        while p1.is_alive() and p2.is_alive():
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        print("\nShutting down...")
+    finally:
+        # Forcefully terminate both processes
+        print("Terminating processes...")
+        if p1.is_alive():
+            p1.terminate()
+            p1.join(timeout=1)
+            if p1.is_alive():
+                p1.kill()  # Force kill if terminate doesn't work
+        if p2.is_alive():
+            p2.terminate()
+            p2.join(timeout=1)
+            if p2.is_alive():
+                p2.kill()  # Force kill if terminate doesn't work
+        print("All processes terminated. Exiting.")
+        sys.exit(0)
