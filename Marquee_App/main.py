@@ -47,22 +47,119 @@ class EffectsWindow:
         notebook.add(color_frame, text="Color Selector")
         notebook.select(color_frame)
         
-        ttk.Label(color_frame, text="Red:", style='Large.TLabel').pack(pady=(10,0))
+        # Color palette with 29 predefined colors (HSV values converted to RGB)
+        self.color_palette = [
+            # OFF state
+            ("OFF", 0.0, 0.0, 0.0),
+            # Whites (various color temperatures)
+            ("2700K", 100.0, 46.7, 6.0),
+            ("3000K", 100.0, 47.9, 8.0),
+            ("3500K", 100.0, 57.9, 13.0),
+            ("3700K", 100.0, 58.4, 14.0),
+            ("4000K", 100.0, 61.7, 18.0),
+            ("4400K", 100.0, 68.8, 25.0),
+            ("4700K", 100.0, 67.2, 27.0),
+            ("5000K", 100.0, 73.2, 30.0),
+            # Reds and Oranges
+            ("Red", 100.0, 0.0, 0.0),
+            ("Fire", 100.0, 1.7, 0.0),
+            ("Pumpkin", 100.0, 5.0, 0.0),
+            ("Amber", 100.0, 16.7, 0.0),
+            ("Tangerine", 100.0, 20.0, 0.0),
+            ("Marigold", 100.0, 25.0, 0.0),
+            ("Sunset", 100.0, 18.3, 0.0),
+            # Yellows and Greens
+            ("Yellow", 100.0, 53.3, 0.0),
+            ("Lime", 100.0, 88.3, 0.0),
+            ("Light Green", 75.0, 100.0, 0.0),
+            ("Green", 0.0, 100.0, 0.0),
+            ("Sea Foam", 0.0, 100.0, 3.3),
+            # Cyans and Blues
+            ("Turquoise", 0.0, 100.0, 73.3),
+            ("Ocean", 0.0, 100.0, 100.0),
+            ("Deep Blue", 0.0, 0.0, 100.0),
+            # Purples and Pinks
+            ("Violet", 75.0, 0.0, 100.0),
+            ("Purple", 66.7, 0.0, 100.0),
+            ("Lavender", 86.7, 0.0, 100.0),
+            ("Pink", 100.0, 0.0, 41.7),
+            ("Hot Pink", 100.0, 0.0, 10.0),
+        ]
+        
+        # Create scrollable frame for color palette
+        palette_container = ttk.Frame(color_frame)
+        palette_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Canvas for scrolling
+        palette_canvas = tk.Canvas(palette_container, highlightthickness=0)
+        palette_scrollbar = ttk.Scrollbar(palette_container, orient="vertical", command=palette_canvas.yview)
+        palette_scrollable_frame = ttk.Frame(palette_canvas)
+        
+        palette_scrollable_frame.bind(
+            "<Configure>",
+            lambda e: palette_canvas.configure(scrollregion=palette_canvas.bbox("all"))
+        )
+        
+        palette_canvas.create_window((0, 0), window=palette_scrollable_frame, anchor="nw")
+        palette_canvas.configure(yscrollcommand=palette_scrollbar.set)
+        
+        # Create color buttons in a grid (4 columns)
+        cols = 4
+        for idx, (name, r, g, b) in enumerate(self.color_palette):
+            row = idx // cols
+            col = idx % cols
+            
+            # Convert RGB (0-100) to hex for display (0-255 range)
+            hex_color = f"#{int(round(r*2.55)):02x}{int(round(g*2.55)):02x}{int(round(b*2.55)):02x}"
+            
+            # Create button frame
+            btn_frame = ttk.Frame(palette_scrollable_frame)
+            btn_frame.grid(row=row, column=col, padx=5, pady=5, sticky="nsew")
+            
+            # Create a canvas to display the color (works better cross-platform than Button bg)
+            color_canvas = tk.Canvas(
+                btn_frame,
+                width=100,
+                height=60,
+                bg=hex_color,
+                highlightthickness=2,
+                highlightbackground="#888888",
+                cursor="hand2"
+            )
+            color_canvas.pack(fill=tk.BOTH, expand=True)
+            
+            # Bind click event to the canvas
+            color_canvas.bind("<Button-1>", lambda e, r=r, g=g, b=b, n=name: self.select_palette_color(r, g, b, n))
+            
+            # Color name label
+            name_label = ttk.Label(btn_frame, text=name, style='Large.TLabel', anchor="center")
+            name_label.pack()
+        
+        # Configure grid weights
+        for i in range(cols):
+            palette_scrollable_frame.columnconfigure(i, weight=1)
+        
+        palette_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        palette_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Selected color display
+        selected_frame = ttk.Frame(color_frame)
+        selected_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        ttk.Label(selected_frame, text="Selected Color:", style='Large.TLabel').pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.selected_color_display = tk.Canvas(selected_frame, width=100, height=50, bg="#000000", relief=tk.SUNKEN, borderwidth=2)
+        self.selected_color_display.pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.selected_color_name = ttk.Label(selected_frame, text="None", style='Large.TLabel')
+        self.selected_color_name.pack(side=tk.LEFT)
+        
+        # Store current color values
         self.red_var = tk.DoubleVar(value=0)
-        red_scale = ttk.Scale(color_frame, from_=0, to=100, variable=self.red_var, orient=tk.HORIZONTAL, length=300)
-        red_scale.pack(pady=10)
-        
-        ttk.Label(color_frame, text="Green:", style='Large.TLabel').pack(pady=(10,0))
         self.green_var = tk.DoubleVar(value=0)
-        green_scale = ttk.Scale(color_frame, from_=0, to=100, variable=self.green_var, orient=tk.HORIZONTAL, length=300)
-        green_scale.pack(pady=10)
-        
-        ttk.Label(color_frame, text="Blue:", style='Large.TLabel').pack(pady=(10,0))
         self.blue_var = tk.DoubleVar(value=0)
-        blue_scale = ttk.Scale(color_frame, from_=0, to=100, variable=self.blue_var, orient=tk.HORIZONTAL, length=300)
-        blue_scale.pack(pady=10)
         
-        ttk.Button(color_frame, text="Send", command=self.send_color, style='Large.TButton').pack(pady=20)
+        ttk.Button(color_frame, text="Send Color", command=self.send_color, style='Big.TButton').pack(pady=20)
         
         # Tab 2: Marquee
         marquee_frame = ttk.Frame(notebook)
@@ -373,6 +470,23 @@ class EffectsWindow:
         self.parent_app.root.clipboard_clear()
         self.parent_app.root.clipboard_append(cmd)
         messagebox.showinfo("Copied", "Direct method string copied to clipboard.")
+    
+    def select_palette_color(self, r, g, b, name):
+        """Handle color selection from the palette"""
+        self.red_var.set(r)
+        self.green_var.set(g)
+        self.blue_var.set(b)
+        
+        # Update the selected color display
+        hex_color = f"#{int(r*2.55):02x}{int(g*2.55):02x}{int(b*2.55):02x}"
+        self.selected_color_display.configure(bg=hex_color)
+        self.selected_color_name.config(text=name)
+        
+        # Log the selection
+        self.parent_app.log(f"Selected color: {name} (R:{r:.0f}, G:{g:.0f}, B:{b:.0f})")
+        
+        # Automatically send the color to the controller
+        self.send_color()
     
     def update_marquee_speed_label(self, *args):
         self.marquee_speed_label.config(text=f"{self.marquee_speed_var.get():.2f}")
